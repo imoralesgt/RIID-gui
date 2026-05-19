@@ -1,0 +1,9 @@
+[project]
+name = "gui"
+version = "0.1.0"
+description = "Graphical user interface for radioisotope identification using custom data acquisition system"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyserial>=3.5",
+]
