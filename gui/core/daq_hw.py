@@ -127,4 +127,3 @@ if __name__ == "__main__":
     pid = daq.DEFAULT_PID
     port_name = daq.find_port(vid, pid)
     print(port_name)
-    print(daq._disregard_jtag())
