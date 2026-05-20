@@ -122,6 +122,8 @@ class DaqHw:
         return False
 
 if __name__ == "__main__":
+
+    ## This is a validation code that should not be run in production
     daq = DaqHw()
     vid = daq.DEFAULT_VID
     pid = daq.DEFAULT_PID
