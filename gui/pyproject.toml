@@ -5,5 +5,7 @@ description = "Graphical user interface for radioisotope identification using cu
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fixedpoint>=1.0.1",
+    "numpy>=2.4.6",
     "pyserial>=3.5",
 ]
