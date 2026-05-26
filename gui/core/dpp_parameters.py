@@ -866,14 +866,14 @@ class Dpp_Timers(__Dpp_Common):
     def __repr__(self):
         return self.__str__()
 
-class Dpp_Scope_Mux(__Dpp_Common):
+class Dpp_Scope_Mux:
     
     def __init__(self,
-                 scopemux_ch1 : int = 0,
-                 scopemux_ch2 : int = 0):
+                 ch1 : int = 0,
+                 ch2 : int = 0):
         
-        self.ch1 = scopemux_ch1
-        self.ch2 = scopemux_ch2
+        self.ch1 = ch1
+        self.ch2 = ch2
 
         self.r1_scopemux_32_0 = self._compute_r1_scopemux()
 
@@ -890,30 +890,30 @@ class Dpp_Scope_Mux(__Dpp_Common):
             self.r1_scopemux_32_0
         ]
 
-        def __validate_scope_channel(self, channel : int) -> int:
-            channel = int(channel)
-            if channel < 0 or channel > 3:
-                channel = 0
-            return channel
+    def __validate_scope_channel(self, channel : int) -> int:
+        channel = int(channel)
+        if channel < 0 or channel > 3:
+            channel = 0
+        return channel
 
-        def _compute_r1_scopemux(self):
-            CH1_OFFSET = 0x00
-            CH2_OFFSET = 0x04
+    def _compute_r1_scopemux(self):
+        CH1_OFFSET = 0x00
+        CH2_OFFSET = 0x04
 
-            ch1 = self.__validate_scope_channel(self.ch1)
-            ch2 = self.__validate_scope_channel(self.ch2)
+        ch1 = self.__validate_scope_channel(self.ch1)
+        ch2 = self.__validate_scope_channel(self.ch2)
 
-            r1_scopemux = 0
-            r1_scopemux |= ch1 << CH1_OFFSET
-            r1_scopemux |= ch2 << CH2_OFFSET
+        r1_scopemux = 0
+        r1_scopemux |= ch1 << CH1_OFFSET
+        r1_scopemux |= ch2 << CH2_OFFSET
 
-            return r1_scopemux
-        
-        def __str__(self):
-            return f"Scope Mux: {self.params_dict}"
-        
-        def __repr__(self):
-            return self.__str__()
+        return r1_scopemux
+    
+    def __str__(self):
+        return f"Scope Mux: {self.params_dict}"
+    
+    def __repr__(self):
+        return self.__str__()
         
 class Dpp_Blr_Fast(__Dpp_Common):
 
@@ -965,6 +965,23 @@ class Dpp_Blr_Fast(__Dpp_Common):
             'r4_b0_32_0'                    : self.r4_b0_32_0,
             'r5_a1_32_0'                    : self.r5_a1_32_0
         }
+
+        """
+        ## Parameters sent to DAQ, see documentation in `doc` folder.
+        ## The DAQ CLI expects the 5 parameters in the following order:
+        - Thresholds (high|low)
+        - Flags
+        - Threshold_gain
+        - b0
+        - a1
+        """
+        self.params_daq : list = [
+            self.r1_threshold_32_0,
+            self.r2_flags_32_0,
+            self.r3_threshold_gain_32_0,
+            self.r4_b0_32_0,
+            self.r5_a1_32_0
+        ]
 
     def _compute_r1_threshold(self):
         # Threshold clamping value must be negative
@@ -1145,7 +1162,7 @@ class Dpp_Formatter(__Dpp_Common):
         Raises:
             ValueError: DC offset must be between -2.0 and 2.0 Volts
         """
-        if offset >= 2.0 or offset <= 2.0:
+        if offset >= 2.0 or offset <= -2.0:
             raise ValueError("DC offset must be between -2.0 and 2.0 Volts.")
 
         return offset
@@ -1581,6 +1598,8 @@ class Dpp_Parameters:
                  scope_clear : bool = True,
                  scope_downsample : int = 1,
                  scope_sampling_mode_flag : int = 1,
+                 scope_mux_ch1 : int = 0,
+                 scope_mux_ch2 : int = 0,
                  timers_preset : int = 10000000,
                  timers_auto_mode : bool = False,
                  timers_a_live_time : bool = True,
@@ -1653,6 +1672,11 @@ class Dpp_Parameters:
             sampling_mode=scope_sampling_mode_flag
         )
 
+        self.scope_mux = Dpp_Scope_Mux(
+            ch1=scope_mux_ch1,
+            ch2=scope_mux_ch2
+        )
+
         self.timers = Dpp_Timers(
             tmr_preset_time=timers_preset,
             tmr_auto_mode=timers_auto_mode,
@@ -1665,7 +1689,6 @@ class Dpp_Parameters:
             tmr_a_clr=timers_a_clear,
             tmr_b_clr=timers_b_clear,
             tmr_c_clr=timers_c_clear
-
         )
 
         self.pk_detector_slow = Dpp_Pk_Detector_Slow(
@@ -2026,6 +2049,8 @@ if __name__ == '__main__':
     SCOPE_CLEAR = True #: Clear the scope buffer on startup
     SCOPE_DOWNSAMPLE_FACTOR = 0 #: Valid values: 1, 2, 3, 4
     SCOPE_SAMPLING_MODE_FLAG = 1 #: 0: Decimate, 1: Max between two samples, 2: Min between two samples
+    SCOPE_MUX_CH1 = 0 #: Scope channel 1
+    SCOPE_MUX_CH2 = 0 #: Scope channel 2
     TIMERS_PRESET = 10000000 #: Timer preset (collection time) in milliseconds,
     TIMERS_AUTO_MODE = False #: Automatic/manual mode acquisition
     TIMERS_A_LIVE_TIME = True #: Measure live time (LT) with Timer A
@@ -2051,7 +2076,7 @@ if __name__ == '__main__':
         tau_r=TAU_R,
         shaper_s_tau_pk=SHAPER_S_TAU_PK,
         shaper_s_tau_pk_top=SHAPER_S_TAU_PK_TOP,
-        shaper_f_tau_pk_=SHAPER_F_TAU_PK,
+        shaper_f_tau_pk=SHAPER_F_TAU_PK,
         shaper_f_tau_pk_top=SHAPER_F_TAU_PK_TOP,
         shaper_s_gain=SHAPER_S_GAIN,
         shaper_f_gain=SHAPER_F_GAIN,
@@ -2063,8 +2088,8 @@ if __name__ == '__main__':
         blr_f_threshold_low=BLR_F_THRESHOLD_LOW,
         blr_f_threshold_gain=BLR_F_THRESHOLD_GAIN,
         blr_f_threshold_low_gain=BLR_F_THRESHOLD_LOW_GAIN,
-        blanking_time_factor=PKD_BLANKING_TIME_FACTOR,
-        time_over_threshold_factor=PKD_TIME_OVER_THRESHOLD_FACTOR,
+        pkd_blanking_time_factor=PKD_BLANKING_TIME_FACTOR,
+        pkd_time_over_threshold_factor=PKD_TIME_OVER_THRESHOLD_FACTOR,
         pur_guard_time_factor=PUR_GUARD_TIME_FACTOR,
         pur_enable=PUR_ENABLE,
         pkd_s_x_min=PKD_S_X_MIN,
@@ -2083,17 +2108,19 @@ if __name__ == '__main__':
         scope_clear=SCOPE_CLEAR,
         scope_downsample=SCOPE_DOWNSAMPLE_FACTOR,
         scope_sampling_mode_flag=SCOPE_SAMPLING_MODE_FLAG,
-        tmr_preset_time=TIMERS_PRESET,
-        tmr_auto_mode=TIMERS_AUTO_MODE,
-        tmr_a_lt=TIMERS_A_LIVE_TIME,
-        tmr_b_lt=TIMERS_B_LIVE_TIME,
-        tmr_c_lt=TIMERS_C_LIVE_TIME,
-        tmr_a_en=TIMERS_A_ENABLE,
-        tmr_b_en=TIMERS_B_ENABLE,
-        tmr_c_en=TIMERS_C_ENABLE,
-        tmr_a_clr=TIMERS_A_CLEAR,
-        tmr_b_clr=TIMERS_B_CLEAR,
-        tmr_c_clr=TIMERS_C_CLEAR,
+        scope_mux_ch1=SCOPE_MUX_CH1,
+        scope_mux_ch2=SCOPE_MUX_CH2,
+        timers_preset=TIMERS_PRESET,
+        timers_auto_mode=TIMERS_AUTO_MODE,
+        timers_a_live_time=TIMERS_A_LIVE_TIME,
+        timers_b_live_time=TIMERS_B_LIVE_TIME,
+        timers_c_live_time=TIMERS_C_LIVE_TIME,
+        timers_a_enable=TIMERS_A_ENABLE,
+        timers_b_enable=TIMERS_B_ENABLE,
+        timers_c_enable=TIMERS_C_ENABLE,
+        timers_a_clear=TIMERS_A_CLEAR,
+        timers_b_clear=TIMERS_B_CLEAR,
+        timers_c_clear=TIMERS_C_CLEAR,
         high_voltage=HIGH_VOLTAGE,
         vga_board_version=VGA_VERSION,
         vga_gain_fine=VGA_GAIN_FINE,
@@ -2134,16 +2161,16 @@ if __name__ == '__main__':
 
     # Also the parameters sent to the DAQ/MCA through the serial interface can be listed as follows.
     print("\nDPP parameter values streamable to the DAQ/MCA using CLI:")
-    print(f"Pulse shaper slow: {dpp_parameters.get_shaper_slow_params_daq}")
-    print(f"Peak detector slow:{dpp_parameters.get_pk_detector_slow_params_daq}")
-    print(f"Scope: {dpp_parameters.get_scope_params_daq}")
-    print(f"Timers: {dpp_parameters.get_timers_params_daq}")
-    print(f"BLR slow: {dpp_parameters.get_blr_slow_params_daq}")
-    print(f"Scope mux: {dpp_parameters.get_scope_mux_params_daq}")
-    print(f"Formatter: {dpp_parameters.get_formatter_params_daq}")
-    print(f"Pulse shaper fast: {dpp_parameters.get_shaper_fast_params_daq}")
-    print(f"BLR fast: {dpp_parameters.get_blr_fast_params_daq}")
-    print(f"Peak detector fast: {dpp_parameters.get_pk_detector_fast_params_daq}")
-    print(f"Pileup rejector: {dpp_parameters.get_pileup_rejector_params_daq}")
-    print(f"High voltage: {dpp_parameters.get_high_voltage_params_daq}")
-    print(f"Variable gain amplifier: {dpp_parameters.get_vga_params_daq}")
+    print(f"Pulse shaper slow: {dpp_parameters.get_shaper_slow_params_daq()}")
+    print(f"Peak detector slow:{dpp_parameters.get_pk_detector_slow_params_daq()}")
+    print(f"Scope: {dpp_parameters.get_scope_params_daq()}")
+    print(f"Timers: {dpp_parameters.get_timers_params_daq()}")
+    print(f"BLR slow: {dpp_parameters.get_blr_slow_params_daq()}")
+    print(f"Scope mux: {dpp_parameters.get_scope_mux_params_daq()}")
+    print(f"Formatter: {dpp_parameters.get_formatter_params_daq()}")
+    print(f"Pulse shaper fast: {dpp_parameters.get_shaper_fast_params_daq()}")
+    print(f"BLR fast: {dpp_parameters.get_blr_fast_params_daq()}")
+    print(f"Peak detector fast: {dpp_parameters.get_pk_detector_fast_params_daq()}")
+    print(f"Pileup rejector: {dpp_parameters.get_pileup_rejector_params_daq()}")
+    print(f"High voltage: {dpp_parameters.get_high_voltage_params_daq()}")
+    print(f"Variable gain amplifier: {dpp_parameters.get_vga_params_daq()}")
