@@ -1319,9 +1319,229 @@ class Dpp_High_Voltage:
     def __repr__(self):
         return self.__str__()
 
-class Dpp_Variable_Gain_Amplifier(__Dpp_Common):
-    def __init__(self):
-        pass
+class Dpp_Variable_Gain_Amplifier:
+
+    #: Common fields across all board revisions, used to generically validate settings
+    VALID_VERSIONS = ('A', 'B')
+    GAIN_FINE_LIMITS = (1.0, 2.0)
+    GAIN_COARSE_LIMITS = (0.5, 5.0)
+    NAME_FIELD = 'NAME'
+    DAC_RES_FIELD = 'DAC_RES'
+    V_REF_FIELD = 'V_REF'
+    
+    #: Includes settings for board version/revision A only
+    BOARD_A_DAC_SETTINGS = {
+        NAME_FIELD : VALID_VERSIONS[0],
+        DAC_RES_FIELD : 16,
+        V_REF_FIELD : 3.3,
+    }
+
+    #: Includes settings for board version/revision B only
+    BOARD_B_DAC_SETTINGS = {
+        NAME_FIELD : VALID_VERSIONS[1],
+        DAC_RES_FIELD : 12,
+        V_REF_FIELD : 2.5,
+    }
+
+    #: Gathers the settings for each board revision
+    BOARDS_SETTINGS = [
+        BOARD_A_DAC_SETTINGS,
+        BOARD_B_DAC_SETTINGS
+    ]
+    
+    def __init__(self,
+                 board_version : str = 'B',
+                 gain_fine : float = 1.0,
+                 gain_coarse : float = 1.0
+                 ):
+        """
+        Variable-gain amplifier setup.
+        The board revision/version defines the gain computation formula.
+        Revision A uses the AD5693 DAC, while revision B uses the AD5697 DAC.
+
+        Check documentation for further details.
+
+        Args:
+            board_version (str, optional): Board revision/version. Can be 'A' or 'B'. Defaults to 'B'.
+            gain_fine (float, optional): Fine gain of the VGA. Expected between 1.0 and 2.0. Defaults to 1.0.
+            gain_coarse (float, optional): Coarse gain of the VGA. Expected between 0.5 and 5.0. Defaults to 1.0.
+        """
+
+        self.version = self.__validate_version(board_version)
+        self.gain_fine = self.__validate_gain_fine(gain_fine) 
+        self.gain_coarse = self.__validate_gain_coarse(gain_coarse)
+
+        self.r1_gain_fine_32_0 = self._compute_r1_gain_fine()
+        self.r2_gain_coarse_32_0 = self._compute_r2_gain_coarse()
+
+        self.params_dict : dict = {
+            'r1_gain_fine_32_0' : self.r1_gain_fine_32_0,
+            'r2_gain_coarse_32_0' : self.r2_gain_coarse_32_0
+        }
+
+        """
+        ## Parameters sent to DAQ, see documentation in `doc` folder.
+        ## The DAQ CLI expects the 2 parameters in the following order:
+        - Gain_fine
+        - Gain_coarse
+        """
+        self.params_daq : list = [
+            self.r1_gain_fine_32_0,
+            self.r2_gain_coarse_32_0
+        ]
+
+    def _compute_r1_gain_fine(self) -> FixedPoint_Bin:
+        """
+        Computes the DAC value to set the fine gain of the VGA. The output
+        is dependent on the board revision/version.
+
+        Returns:
+            FixedPoint_Bin: DAC value
+        """
+        
+        board_settings = self.__lookup_board_settings(self.version)
+
+        gain_fine = self.__compute_gain_dac(
+            gain = self.gain_fine,
+            dac_resolution = board_settings[self.DAC_RES_FIELD],
+            ref_voltage = board_settings[self.V_REF_FIELD]
+        )
+
+        return FixedPoint_Bin(gain_fine, False, 32, 0)
+    
+    def _compute_r2_gain_coarse(self) -> FixedPoint_Bin:
+        """
+        Computes the DAC value to set the coarse gain of the VGA. The output
+        is dependent on the board revision/version.
+
+        Returns:
+            FixedPoint_Bin: DAC value
+        """
+        
+        board_settings = self.__lookup_board_settings(self.version)
+
+        gain_coarse = self.__compute_gain_dac(
+            gain = self.gain_coarse,
+            dac_resolution = board_settings[self.DAC_RES_FIELD],
+            ref_voltage = board_settings[self.V_REF_FIELD]
+        )
+
+        return FixedPoint_Bin(gain_coarse, False, 32, 0)
+
+
+    def __compute_gain_dac(self,
+                        gain : float,
+                        dac_resolution : int,
+                        ref_voltage : float,
+                        ) -> int:
+        """
+        Generic method to compute the DAC value for the given gain. Can
+        be resused among the different board revisions.
+
+        Args:
+            gain (float): Gain value
+            dac_resolution (int): DAC resolution
+            ref_voltage (float): Reference voltage
+
+        Returns:
+            int: DAC value
+        """
+
+        OFFSET = 0.5 ## Quantization offset
+
+        y = gain*(2**dac_resolution)/(2*ref_voltage) + OFFSET
+        y = int(y)
+
+        return y
+    
+    def __lookup_board_settings(self, name : str) -> dict:
+        """
+        Look up the settings for a given board revision/version.
+
+        Args:
+            name (str): Board revision/version. Can be 'A' or 'B'.
+
+        Returns:
+            dict: Settings for the given board revision/version
+
+        Raises:
+            ValueError: If the board revision/version is not found
+        """
+        for setting in self.BOARDS_SETTINGS:
+            if setting[self.NAME_FIELD] == name:
+                return setting
+            
+        raise ValueError(f"VGA Board revision {name} not found. Valid revisions are: {self.VALID_VERSIONS}.")
+
+
+    def __validate_version(self, version : str) -> str:
+        """
+        Validates the version of the board.
+
+        Args:
+            version (str): Board revision/version. Can be 'A' or 'B'.
+
+        Returns:
+            str: Validated board revision/version
+
+        Raises:
+            ValueError: If the board revision/version is not valid
+        """
+        version = str(version).upper()
+
+        if version not in self.VALID_VERSIONS:
+            raise ValueError(f"VGA Board version must be one of the following: {self.VALID_VERSIONS}.")
+        
+        return version
+    
+    def __validate_gain_fine(self, gain_fine : float) -> float:
+        """
+        Validates the fine gain setting to be within the expected range.
+
+        Args:
+            gain_fine (float): Gain fine
+
+        Returns:
+            float: Validated gain fine
+
+        Raises:
+            ValueError: If the fine gain is not within the expected range
+        """
+        min_gain = self.GAIN_FINE_LIMITS[0]
+        max_gain = self.GAIN_FINE_LIMITS[1]
+
+        if gain_fine < min_gain or gain_fine > max_gain:
+            raise ValueError(f"VGA fine gain must be between {min_gain} and {max_gain}.")
+        
+        return gain_fine
+    
+    def __validate_gain_coarse(self, gain_coarse : float) -> float:
+        """
+        Validates the coarse gain setting to be within the expected range.
+
+        Args:
+            gain_coarse (float): Gain coarse
+
+        Returns:
+            float: Validated coarse gain 
+
+        Raises:
+            ValueError: If the coarse gain is not within the expected range
+        """
+        min_gain = self.GAIN_COARSE_LIMITS[0]
+        max_gain = self.GAIN_COARSE_LIMITS[1]
+
+        if gain_coarse < min_gain or gain_coarse > max_gain:
+            raise ValueError(f"VGA coarse gain must be between {min_gain} and {max_gain}.")
+        
+        return gain_coarse
+    
+    def __str__(self):
+        return f"Variable-gain amplifier (VGA): {self.params_dict}"
+    
+    def __repr__(self):
+        return self.__str__()
+        
 
 class Dpp_Parameters:
     def __init__(self, sampling_rate : float,
@@ -1372,7 +1592,10 @@ class Dpp_Parameters:
                  timers_a_clear : bool = False,
                  timers_b_clear : bool = False,
                  timers_c_clear : bool = False,
-                 high_voltage : float = 0.0):
+                 high_voltage : float = 0.0,
+                 vga_board_version : str = 'B',
+                 vga_gain_fine : float = 1.0,
+                 vga_gain_coarse : float = 1.0):
         """
         Parameters computation for DPP. Integrates individual modules: such as
         the pulse shaper, slow baseline restorer, slow peak detector, fast
@@ -1505,6 +1728,12 @@ class Dpp_Parameters:
 
         self.high_voltage = Dpp_High_Voltage(
             set_hv=high_voltage
+        )
+
+        self.variable_gain_amplifier = Dpp_Variable_Gain_Amplifier(
+            board_version=vga_board_version,
+            gain_fine=vga_gain_fine,
+            gain_coarse=vga_gain_coarse
         )
     
     def get_shaper_slow_params(self) -> dict:
@@ -1715,6 +1944,44 @@ class Dpp_Parameters:
             list: A serializable list of parameters to configure the MCA/DAQ
         """
         return self.pileup_rejector.params_daq
+
+    def get_high_voltage_params(self) -> dict:
+        """
+        Returns the parameters of the high voltage for PMT module as a dictionary.
+
+        Returns:
+            dict: A dictionary containing the parameters of the high voltage module.
+        """
+        return self.high_voltage.params_dict
+    
+    def get_high_voltage_params_daq(self) -> list:
+        """
+        Returns the fast shaper parameter list ready to be streamed
+        out to the DAQ/MCA using the serial command line interface
+
+        Returns:
+            list: A serializable list of parameters to configure the MCA/DAQ
+        """
+        return self.high_voltage.params_daq
+    
+    def get_vga_params(self) -> dict:
+        """
+        Returns the parameters for the variable-gain amplifier module as a dictionary.
+
+        Returns:
+            dict: A dictionary containing the parameters of the VGA module.
+        """
+        return self.variable_gain_amplifier.params_dict
+    
+    def get_vga_params_daq(self) -> list:
+        """
+        Returns the fast shaper parameter list ready to be streamed
+        out to the DAQ/MCA using the serial command line interface
+
+        Returns:
+            list: A serializable list of parameters to configure the MCA/DAQ
+        """
+        return self.variable_gain_amplifier.params_daq
         
 
 """
@@ -1770,6 +2037,11 @@ if __name__ == '__main__':
     TIMERS_A_CLEAR = False #: Reset timer A before starting
     TIMERS_B_CLEAR = False #: Reset timer B before starting
     TIMERS_C_CLEAR = False #: Reset timer C before starting
+    HIGH_VOLTAGE = 0 #: High voltage for PMT (in Volts)
+    VGA_VERSION = 'B' #: Version/revision of the board. Valid values: A, B (string)
+    VGA_GAIN_FINE = 1.0 #: Fine gain of the variable-gain amplifier in the AFE (before ADC)
+    VGA_GAIN_COARSE = 1.0 #: Coarse gain of the variable-gain amplifier in the AFE (before ADC)
+    
 
 
     # Initializing the DPP parameters class instance
@@ -1821,7 +2093,11 @@ if __name__ == '__main__':
         tmr_c_en=TIMERS_C_ENABLE,
         tmr_a_clr=TIMERS_A_CLEAR,
         tmr_b_clr=TIMERS_B_CLEAR,
-        tmr_c_clr=TIMERS_C_CLEAR
+        tmr_c_clr=TIMERS_C_CLEAR,
+        high_voltage=HIGH_VOLTAGE,
+        vga_board_version=VGA_VERSION,
+        vga_gain_fine=VGA_GAIN_FINE,
+        vga_gain_coarse=VGA_GAIN_COARSE
     )
 
     # You can either print the class instance to show its parameters in console
