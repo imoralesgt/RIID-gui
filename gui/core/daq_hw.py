@@ -2,8 +2,9 @@ from serial import Serial
 from serial.tools import list_ports
 import os
 
-class DaqHw:
+class DaqHw(Serial):
 
+    #: Use these default values for the USB-UART FTDI chip in the CMOD A7 board
     DEFAULT_VID = "0403"
     DEFAULT_PID = "6010"
 
@@ -41,7 +42,8 @@ class DaqHw:
 
     def find_port(self, vid : int, pid : int) -> str:
         """
-        Finds the serial port of the target device
+        Finds the serial port of the target device. If unsure of
+        the VID and PID, use the DEFAULT_VID and DEFAULT_PID class attributes.
 
         Parameters
         ----------
@@ -84,7 +86,7 @@ class DaqHw:
 
         return None
     
-    def open_port(self, port_name : str, baudrate : int):
+    def open_port(self, port_name : str, baudrate : int) -> Serial:
         """
         Opens a serial port
 
@@ -100,9 +102,9 @@ class DaqHw:
         Serial
             The instance of the opened serial port
         """
-        return Serial(port_name, baudrate)
+        return super().__init__(port_name, baudrate)
     
-    def close_port(self, port_instance : Serial):
+    def close_port(self, port_instance : Serial) -> bool:
         """
         Closes a serial port
 
@@ -125,7 +127,17 @@ if __name__ == "__main__":
 
     ## This is a validation code that should not be run in production
     daq = DaqHw()
+
+    ## Taking the default VID and PID for the CMOD A7 development board
     vid = daq.DEFAULT_VID
     pid = daq.DEFAULT_PID
+
+    ## Finding the port corresponding to the device we are looking for
     port_name = daq.find_port(vid, pid)
-    print(port_name)
+    print(f"DAQ found in port: {port_name}")
+
+    ## Checking if the port can be opened and closed
+    daq.open_port(port_name, 115200)
+    print(f"Port opened: {daq.is_open}")
+    daq.close_port(daq)
+    print(f"Port closed: {not daq.is_open}")
