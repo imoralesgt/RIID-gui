@@ -18,8 +18,7 @@ import math
 
 class FixedPoint_Bin:
     def __new__(cls, val : int, signed : bool, m : int, n : int, return_binary_str : bool = False, *args, **kwargs):
-        """Constructor of a FixedPoint object, further padded with leading zeros
-        and returned in binary format. 
+        """Used to compute a FixedPoint representation of a floating-point number.
         
         Args:
             val (int): Value/number to be converted into fixed point and returned as padded binary
@@ -69,7 +68,7 @@ class __Dpp_Common:
 
     def __init__(self, sampling_rate : float):
         """
-        Shared parameters among DPP modules.
+        Shared parameters among DPP parameters computation modules.
 
         Args:
             sampling_rate (float): Sampling rate of the signal (Hz)
@@ -107,7 +106,7 @@ class Dpp_Shaper(__Dpp_Common):
                 dc_offset_at_filter_input : float = 0.0,
                 dc_offset_at_filter_output : float = 0.0,):
         """
-        Pulse shaper parameters computation.
+        Pulse shaper parameters computation. Used for both fast and slow shapers in the DPP.
 
         Args:
             sampling_rate (float): Sampling rate of the ADC
@@ -392,7 +391,7 @@ class Dpp_Blr_Slow(__Dpp_Common):
                 threshold_low_gain : float = 2.0,
                 ):
         """
-        Baseline restorer parameters computation. Slow BLR module used in MCA.
+        Baseline restorer parameters computation. Slow BLR module used in the DPP.
 
         Args:
             sampling_rate (float): Sampling rate of the ADC
@@ -548,13 +547,13 @@ class Dpp_Pk_Detector_Slow(__Dpp_Common):
                 ):
         """
         Peak detector parameters computation. Slow peak detector used to extract the
-        event energy for the MCA.
+        event energy in the DPP.
 
         Args:
             sampling_rate (float): Sampling rate of the ADC
             tau_pk (float): Peaking time (in seconds)
-            tau_pk_top (float): Flat top time (in seconds)
-            blanking_time_factor (float, optional): Blanking time factor. Defaults to 0.9.
+            tau_pk_top (float): Flat top duration (in seconds)
+            blanking_time_factor (float, optional): Blanking time factor (look ahead). Defaults to 0.9.
             time_over_thrshld_factor (float, optional): Time over threshold factor. Defaults to 0.44.
             x_min (float, optional): Minimum value for the output. Defaults to 0.01.
             x_max (float, optional): Maximum value for the output. Defaults to 1.99.
@@ -642,14 +641,14 @@ class Dpp_Scope(__Dpp_Common):
                  sampling_mode : int,
                  ):
         """
-        Integrated oscilloscope module configuration
+        Integrated oscilloscope module configuration.
 
         Args:
             sampling_rate (float): Sampling rate of the ADC (in Hz)
-            bram_size (int): Size of the BRAM (in samples)
+            bram_size (int): Size of the BRAM to store the traces (in samples)
             threshold (float): Trigger threshold (in Volts)
             delay (int): Trigger delay (in sample units)
-            enable (bool): Enabled oscilloscope upon startup
+            enable (bool): Is the oscilloscope enabled upon startup?
             clear (bool): Clear trigger before starting
             downsample_factor (int): Downsampling factor - valid values are 1, 2, 3, 4
             sampling_mode (int): Sampling mode - 0: Decimate, 1: Max between two samples, 2: Min between two samples
@@ -783,7 +782,7 @@ class Dpp_Scope(__Dpp_Common):
         return self.__str__()
 
 
-class Dpp_Timers(__Dpp_Common):
+class Dpp_Timers:
 
     def __init__(self,
                  tmr_preset_time : int = 10000000,
@@ -798,6 +797,27 @@ class Dpp_Timers(__Dpp_Common):
                  tmr_b_clr: bool = False,
                  tmr_c_clr: bool = False,
                  ):
+        """
+        Computation of the timer parameters to be sent to the DPP. 
+        
+        The timers measure the collection time of the spectrum (histogram).
+        Three timers are available: A, B, and C. Each timer can be configured
+        to count real time or live time. They can be disabled or enabled individually.
+        Notice that **Timer C** controls the collection time and must be always enabled.
+
+        Args:
+            tmr_preset_time (int): Preset time for the collection of the spectrum (in milliseconds).
+            tmr_auto_mode (int): 0 for manual mode, 1 for auto mode. Uses ping-pong memory access. Usually disabled.
+            tmr_a_lt (bool): True for live time, False for real time.
+            tmr_b_lt (bool): True for live time, False for real time.
+            tmr_c_lt (bool): True for live time, False for real time.
+            tmr_a_en (bool): True to enable timer A.
+            tmr_b_en (bool): True to enable timer B.
+            tmr_c_en (bool): True to enable timer C.
+            tmr_a_clr (bool): True to clear timer A.
+            tmr_b_clr (bool): True to clear timer B.
+            tmr_c_clr (bool): True to clear timer C.
+        """
 
         self.auto_mode = tmr_auto_mode
         self.tmr_a_lt = tmr_a_lt
@@ -872,6 +892,14 @@ class Dpp_Scope_Mux:
                  ch1 : int = 0,
                  ch2 : int = 0):
         
+        """
+        Scope input multiplexer module.
+
+        Args:
+            ch1 (int, optional): Channel 1 selection. Defaults to 0.
+            ch2 (int, optional): Channel 2 selection. Defaults to 0.
+        """
+        
         self.ch1 = ch1
         self.ch2 = ch2
 
@@ -931,7 +959,7 @@ class Dpp_Blr_Fast(__Dpp_Common):
                 threshold_low_gain : float = 2.0,
                 ):
         """
-        Fast BLR module parameters computation. Used in pile-up rejection module.
+        Fast BLR module parameters computation. Used in pile-up rejection subsystem.
 
         Args:
             sampling_rate (float): Sampling rate of the ADC
@@ -1040,7 +1068,7 @@ class Dpp_Pk_Detector_Fast(Dpp_Pk_Detector_Slow):
                 x_max : float = 1.99,
                 ):
         """
-        Fast peak detector parameters computation. Used in pile-up rejection module.
+        Fast peak detector parameters computation. Used in pile-up rejection subsystem.
 
         Args:
             sampling_rate (float): Sampling rate of the ADC
@@ -1075,6 +1103,9 @@ class Dpp_Formatter(__Dpp_Common):
         
         """
         DPP Formatter (preprocessing) module parameters computation.
+         
+        Used to digitally manipulate the trace from the ADC prior to the DPP.
+        Provides optional DC offset, polarity inversion and smoothing (moving average).
 
         Args:
             sampling_rate (float): Sampling rate of the ADC
@@ -1198,6 +1229,18 @@ class Dpp_Pileup_Rejector(__Dpp_Common):
                  guard_time_factor : float = 1.7,
                  enable_pur : bool = True,
                  ):
+        """
+        Pile-up rejector module parameters computation. 
+
+        Args:
+            sampling_rate (float): Sampling rate of the ADC.
+            shaper_s_tau_pk (float): Slow pulse shaper peaking time constant.
+            shaper_s_tau_pk_top (float): Slow pulse shaper flat-top duration.
+            shaper_f_tau_pk (float): Fast pulse shaper peaking time constant
+            shaper_f_tau_pk_top (float): Fast pulse shaper flat-top duration.
+            guard_time_factor (float, optional): Guard time factor. Defaults to 1.7.
+            enable_pur (bool, optional): Enable module flag. Defaults to True.
+        """
         
         super().__init__(sampling_rate = sampling_rate)
 
