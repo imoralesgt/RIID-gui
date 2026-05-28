@@ -64,6 +64,47 @@ class FixedPoint_Bin:
 
         return bin_digits
 
+class __Aux_Conversions:
+    """
+    Auxiliary methods to perform the opposite operations of the FixedPoint_Bin class.
+
+    Used during development to validate existing 32-bit numbers from the original DPP configuration bits.
+    """
+
+    def signed_32_to_float(self, raw_int, total_bits, fractional_bits):
+        """Converts a 32-bit signed integer into its floating-point representation.
+
+        Args:
+            raw_int (int): The 32-bit signed integer to be converted.
+            total_bits (int): The total number of bits in the integer, including the sign bit (m+n).
+            fractional_bits (int): The number of fractional bits in the integer (n).
+
+        Returns:
+            float: The floating-point representation of the input integer.
+        """
+
+        # Solve the 2-complement to interpret the sign
+        if raw_int & (1 << (total_bits - 1)):  # Is the MSB 1?
+            raw_int -= (1 << total_bits)       # In that case, convert to negative
+            
+        # Divide by 2^n to get the float value
+        return raw_int / (1 << fractional_bits)
+
+
+    def unsigned_32_to_float(self, raw_int, fractional_bits):
+        """Converts a 32-bit unsigned integer into its floating-point representation.
+
+        Args:
+            raw_int (int): The 32-bit unsigned integer to be converted.
+            fractional_bits (int): The number of fractional bits in the integer (n).
+
+        Returns:
+            float: The floating-point representation of the input integer.
+        
+        """
+        # Equivalent operation to raw_int / 2^n, being n = fractional_bits
+        return raw_int / (1 << fractional_bits)
+
 class __Dpp_Common:
 
     def __init__(self, sampling_rate : float):
