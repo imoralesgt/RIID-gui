@@ -1,3 +1,0 @@
-[submodule "gui/daq-core"]
-	path = gui/daq-core
-	url = git@github.com:imoralesgt/NSIL-MCA-DPP4SiPM.git
