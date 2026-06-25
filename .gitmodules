@@ -1,3 +1,3 @@
-[submodule "gui/daq-core"]
-	path = gui/daq-core
+[submodule "daq-core/NSIL-MCA-DPP4SiPM"]
+	path = daq-core/NSIL-MCA-DPP4SiPM
 	url = git@github.com:imoralesgt/NSIL-MCA-DPP4SiPM.git
