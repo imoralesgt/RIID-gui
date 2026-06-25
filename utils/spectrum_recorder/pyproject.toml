@@ -1,0 +1,18 @@
+[project]
+name = "spectrum-recorder"
+version = "0.1.0"
+description = "This utility allows the user to record spectra from the detector using the command line interface."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "python-api",
+]
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.uv.sources]
+python-api = { workspace = true }
