@@ -1,0 +1,13 @@
+[project]
+name = "riid-gui-workspace"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "utils/spectrum_recorder",
+    "daq-core/NSIL-MCA-DPP4SiPM/sw/python-api"
+]
