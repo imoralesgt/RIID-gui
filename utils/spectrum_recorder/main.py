@@ -58,19 +58,23 @@ class ConfigurationManager:
             help="Base name for the output file without extension (Default: 'spectrum')",
         )
         parser.add_argument(
+            "-n", "--spectra_count", type=int, default=1, dest="spectra_count",
+            help="Number of sequential spectra (N) to record automatically (Default: 1)",
+        )
+        parser.add_argument(
             "--no_timestamp", action="store_true",
             help="Disable automatic date-time strings in the filename execution",
         )
         parser.add_argument(
-            "--no_plot", action="store_true",
-            help="Disable displaying the interactive graphic window upon completion",
+            "--show_plot", action="store_true",
+            help="Enable displaying the interactive graphic window upon completion (Disabled by default)",
         )
         parser.add_argument(
             "--no_save_img", action="store_true",
             help="Explicitly disable saving the rendered spectrum plot image to disk",
         )
 
-        # Hardware tuning options (Defaults set to None to intercept raw user entries)
+        # Hardware tuning options
         parser.add_argument("--tau_d", type=float, default=None, help="Decay time shape (s)")
         parser.add_argument("--tau_r", type=float, default=None, help="Rise time shape (s)")
         parser.add_argument("--shaper_s_tau_pk", type=float, default=None, help="Peaking time slow shaper (s)")
@@ -88,13 +92,11 @@ class ConfigurationManager:
             "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
         )
 
-        # Permanent background file logger
         file_handler = logging.FileHandler("spectrum_recorder.log", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-        # Console user interface stream logger
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG if self.args.verbose else logging.WARNING)
         console_handler.setFormatter(formatter)
@@ -103,21 +105,8 @@ class ConfigurationManager:
         logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
     def load_json_profile(self, serial_number: str, json_path: str = "detectors.json") -> dict:
-        """Loads calibration overrides matching a specific serial number parent key from JSON.
-
-        If the serial number key is missing, this method appends a new profile containing
-        the baseline script default DPP settings directly back to the database file.
-
-        Args:
-            serial_number: Hardware serial number string used as the database lookup key.
-            json_path: Path destination targeting the config JSON database file.
-
-        Returns:
-            dict: Parameter dictionary mapping configuration settings for the device.
-        """
+        """Loads calibration overrides matching a specific serial number parent key from JSON."""
         data = {}
-        
-        # Read the file if it exists, otherwise start with an empty database dictionary
         if os.path.exists(json_path):
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
@@ -130,7 +119,6 @@ class ConfigurationManager:
             logger.info("Matching profile found in JSON for S/N: %s", serial_number)
             return data[serial_number]
 
-        # Auto-populate and write back defaults if the serial number is unknown
         logger.warning(
             "S/N: %s not found in '%s'. Registering new device profile entry with default parameters.",
             serial_number, json_path
@@ -147,10 +135,7 @@ class ConfigurationManager:
         return data[serial_number]
 
     def resolve_parameters(self, profile: dict) -> dict:
-        """Resolves digital pulse processing values using a strict 3-tier hierarchy matrix.
-
-        Priority Chain: 1. CLI Explicit Input -> 2. JSON Device Profile -> 3. Hardcoded Defaults
-        """
+        """Resolves digital pulse processing values using a strict 3-tier hierarchy matrix."""
         resolved = {}
         for key, script_default in self.DEFAULTS_DPP.items():
             cli_value = getattr(self.args, key, None)
@@ -167,17 +152,28 @@ class ConfigurationManager:
                 
         return resolved
 
-    def generate_filename(self, serial_number: str) -> str:
-        """Processes parameters to calculate file save destinations inside 'spectra/'."""
+    def generate_filename(self, serial_number: str, timestamp_str: str, loop_index: int = None) -> str:
+        """Processes parameters to calculate file save destinations inside 'spectra/'.
+
+        Args:
+            serial_number: Hardware serial number string extracted from the detector.
+            timestamp_str: Pre-calculated frozen date-time string shared across the session.
+            loop_index: Optional integer tracking the current acquisition count loop.
+
+        Returns:
+            str: Absolute or relative target destination file path.
+        """
         target_dir = "spectra"
         os.makedirs(target_dir, exist_ok=True)
 
         base_name = self.args.output[:-4] if self.args.output.endswith(".spe") else self.args.output
-        
         filename = f"{base_name}_{serial_number}"
+        
+        if loop_index is not None:
+            filename = f"{filename}_run{loop_index:02d}"
+
         if not self.args.no_timestamp:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{filename}_{timestamp}"
+            filename = f"{filename}_{timestamp_str}"
 
         filename = f"{filename}.spe"
         if not os.path.isabs(filename):
@@ -207,9 +203,22 @@ class SpectrumRecorderApp:
             logger.error("Failed to extract device signature info during initial probe phase: %s", e)
             sys.exit(1)
 
-    def run_acquisition(self, dpp_settings: dict) -> list:
-        """Initializes final device settings and tracks live runtime clocks."""
+    def run_acquisition(self, dpp_settings: dict) -> None:
+        """Initializes final device settings and loops continuous acquisition counters.
+
+        Args:
+            dpp_settings: Resolved hardware configuration settings parameter dictionary.
+        """
         preset_ms = self.config_mgr.args.collection_time * 1000
+        total_runs = self.config_mgr.args.spectra_count
+
+        if not self.config_mgr.args.show_plot:
+            plt.switch_backend('Agg')
+            logger.debug("Headless rendering context activated via matplotlib 'Agg' backend engine.")
+
+        # CRITICAL FIX: Freeze the session timestamp exactly when the call begins
+        session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         daq_api = DaqCommands(
             timers_preset=preset_ms,
             timers_a_live_time=False,
@@ -230,33 +239,41 @@ class SpectrumRecorderApp:
             logger.info("Connected Device Firmware Version: %s", self.firmware_version)
             logger.info("Connected Device Serial Number: %s", self.serial_number)
 
-            daq_api.clear_spectrum()
-            daq_api.timers_reset()
-            daq_api.data_acquisition_start()
+            for run_idx in range(1, total_runs + 1):
+                if total_runs > 1:
+                    print(f"\n--- Starting Spectrum Acquisition Cycle [{run_idx}/{total_runs}] ---")
+                    logger.info("Executing continuous sequence batch tracking cycle %d/%d", run_idx, total_runs)
 
-            print(f"Starting acquisition. Target Live-Time: {self.config_mgr.args.collection_time} seconds")
+                daq_api.clear_spectrum()
+                daq_api.timers_reset()
+                daq_api.data_acquisition_start()
 
-            with tqdm(total=self.config_mgr.args.collection_time, desc="Collecting spectrum (Live-Time)") as pbar:
-                last_elapsed = 0
-                while True:
-                    timers_data = daq_api.timers_read()
-                    current_live_ms = timers_data["tmr_c"]
-                    current_live_seconds = int(current_live_ms / 1000)
+                print(f"Acquisition running. Target Live-Time: {self.config_mgr.args.collection_time} seconds")
 
-                    logger.debug("Polling timers -> tmr_c: %d ms | tmr_a: %d ms", current_live_ms, timers_data["tmr_a"])
+                with tqdm(total=self.config_mgr.args.collection_time, desc=f"Collecting spectrum #{run_idx}") as pbar:
+                    last_elapsed = 0
+                    while True:
+                        timers_data = daq_api.timers_read()
+                        current_live_ms = timers_data["tmr_c"]
+                        current_live_seconds = int(current_live_ms / 1000)
 
-                    step = current_live_seconds - last_elapsed
-                    if step > 0:
-                        pbar.update(step)
-                        last_elapsed = current_live_seconds
+                        logger.debug("Polling timers -> tmr_c: %d ms | tmr_a: %d ms", current_live_ms, timers_data["tmr_a"])
 
-                    if current_live_ms >= preset_ms:
-                        break
-                    sleep(1.0)
+                        step = current_live_seconds - last_elapsed
+                        if step > 0:
+                            pbar.update(step)
+                            last_elapsed = current_live_seconds
 
-            spectrum = daq_api.read_spectrum()
-            timers_final = daq_api.timers_read()
-            self._save_session_outputs(spectrum, timers_final)
+                        if current_live_ms >= preset_ms:
+                            break
+                        sleep(1.0)
+
+                spectrum = daq_api.read_spectrum()
+                timers_final = daq_api.timers_read()
+                
+                # Pass run index only if N > 1, along with the frozen session timestamp
+                loop_param = run_idx if total_runs > 1 else None
+                self._save_session_outputs(spectrum, timers_final, session_timestamp, loop_index=loop_param)
 
         except Exception as e:
             logger.error("Acquisition failed due to physical hardware error.", exc_info=True)
@@ -264,11 +281,13 @@ class SpectrumRecorderApp:
             daq_api.close()
             logger.info("Serial communication interface channel closed safely.")
 
-    def _save_session_outputs(self, spectrum: list, timers_final: dict) -> None:
+    def _save_session_outputs(self, spectrum: list, timers_final: dict, session_timestamp: str, loop_index: int = None) -> None:
         """Internal worker logic managing file export and plotting executions."""
         final_live = timers_final["tmr_c"] / 1000.0
         final_real = timers_final["tmr_a"] / 1000.0
-        final_filename = self.config_mgr.generate_filename(self.serial_number)
+        
+        # Call generate_filename passing the frozen timestamp and loop index explicitly
+        final_filename = self.config_mgr.generate_filename(self.serial_number, session_timestamp, loop_index=loop_index)
 
         logger.info("Total Counts Collected: %d", sum(spectrum))
         logger.info("Metrics -> Live-Time: %.2fs | Real-Time: %.2fs", final_live, final_real)
@@ -276,7 +295,7 @@ class SpectrumRecorderApp:
         self._export_spe_file(final_filename, spectrum, final_live, final_real)
 
         img_path = final_filename[:-4] + ".png" if not self.config_mgr.args.no_save_img else None
-        if img_path or not self.config_mgr.args.no_plot:
+        if img_path or self.config_mgr.args.show_plot:
             self._render_plot(spectrum, img_path)
 
     def _export_spe_file(self, path: str, spectrum: list, live: float, real: float) -> None:
@@ -296,7 +315,7 @@ class SpectrumRecorderApp:
         plt.style.use("ggplot")
         plt.figure(figsize=(10, 5))
         plt.plot(range(len(spectrum)), spectrum, label="MCA Counts", linewidth=1.0)
-        plt.title(f"Captured Energy Spectrum - S/N: {self.serial_number}", fontsize=12, fontweight="bold")
+        plt.title(f"Captured Energy Spectrum - S/N: {self.secret_sn if hasattr(self, 'secret_sn') else self.serial_number}", fontsize=12, fontweight="bold")
         plt.xlabel("ADC Channel Bin Number", fontsize=10)
         plt.ylabel("Event Count (N)", fontsize=10)
         plt.yscale("log")
@@ -307,8 +326,9 @@ class SpectrumRecorderApp:
         if img_path:
             plt.savefig(img_path, dpi=300)
             logger.info("Spectrum chart successfully exported to: %s", img_path)
-        if not self.config_mgr.args.no_plot:
+        if self.config_mgr.args.show_plot:
             plt.show()
+        plt.close()
 
 
 def handle_unhandled_exception(exc_type, exc_value, exc_traceback) -> None:
@@ -323,18 +343,70 @@ sys.excepthook = handle_unhandled_exception
 
 
 def main():
-    """Main application launcher initializing object orchestration workflows."""
+    """Main application for the automated spectrum recorder application.
+    
+    This execution lifecycle follows a strict pipeline:
+      1. Instantiates a ConfigurationManager to catch and sanitize user console input.
+      2. Set up background logs tracing and standard terminal streams handlers.
+      3. Probes the hardware serial port via a temporary lightweight connection to pull the serial number.
+      4. References the pulled serial number against 'detectors.json' to query DPP parameters.
+      5. Runs the 3-Tier matrix resolving engine (CLI beats JSON Profile, which beats Defaults).
+      6. Runs up a permanent hardware link session and loops acquisition N sequential times.
+    """
+    # -------------------------------------------------------------------------
+    # STEP 1: Process User Runtime Parameters & Define Flags
+    # -------------------------------------------------------------------------
+    # Create the config object instance. This automatically runs argparse validation.
+    # If required arguments like --collection_time are missing, execution aborts here.
     config_mgr = ConfigurationManager()
+    
+    # -------------------------------------------------------------------------
+    # STEP 2: Configure System Output Telemetry (Dual-Pipe Setup)
+    # -------------------------------------------------------------------------
+    # Set up logging handlers. Standard logs print to 'spectrum_recorder.log' down
+    # to DEBUG level. Console stream displays WARNINGS unless --verbose is passed.
     config_mgr.setup_logging()
+    logger.debug("Core application initialization sequence triggered successfully.")
 
+    # -------------------------------------------------------------------------
+    # STEP 3: Initialize App Space & Probe Detector Identity (Identity Check)
+    # -------------------------------------------------------------------------
+    # Instantiate the main application worker, passing the active configuration.
     app = SpectrumRecorderApp(config_mgr)
+    
+    # Open and close a fast serial communication link to fetch the DAQ/MCA
+    # Serial Number (S/N). This must occur BEFORE creating the DPP registers
+    # mapping, as the S/N defines parameter lookups.
     serial_number = app.probe_hardware_identity()
     
+    # -------------------------------------------------------------------------
+    # STEP 4: Profile Database Fetching & Auto-Registration Engine
+    # -------------------------------------------------------------------------
+    # Query 'detectors.json' searching for a record matching the parsed serial_number.
+    # If the key is entirely missing, this method automatically writes an entry for
+    # this device containing base script default variables back to disk.
     profile = config_mgr.load_json_profile(serial_number)
+    
+    # -------------------------------------------------------------------------
+    # STEP 5: Run Hierarchical Parameter Resolving Matrix (3-Tier Tree)
+    # -------------------------------------------------------------------------
+    # Map out the final digital pulse processing (DPP) properties dictionary.
+    # The resolution rules check priorities: CLI user flags overrule database JSON
+    # variables, and missing attributes fallback to hardcoded default values.
     dpp_settings = config_mgr.resolve_parameters(profile)
 
+    # -------------------------------------------------------------------------
+    # STEP 6: Execute Data Acquisition Sessions & Sequential Batch Processing
+    # -------------------------------------------------------------------------
+    # Launches the primary measurement routine. This establishes a UART connection,
+    # locks down a baseline execution session timestamp, configures DPP parameters
+    # into the DAQ/MCA (sends the parameters), clears multichannel analyzer bins,
+    # and tracks the acquisition loop N sequential times based on the
+    # provided flag.
     app.run_acquisition(dpp_settings)
 
 
 if __name__ == "__main__":
+    # Standard entry point execution anchor. sys.excepthook has been linked 
+    # upstream to catch any unexpected runtime failures and route them to log files.
     main()

@@ -2,7 +2,7 @@
 
 An automated, standalone object-oriented command-line application designed to interface with the **DPP4SiPM DAQ/MCA hardware board** to capture, track, plot, and log radiation energy spectra.
 
-This utility is part of the `RIID-gui` workspace repository and links with the decoupled `python-api` module, which serves as the low-level backend to interact with the DAQ/MCA boards.
+This utility is part of the `RIID-gui` workspace repository and links with the decoupled `python-api` module, which serves as the low-level backend to interact with the DAQ/MCA boards over a UART serial connection.
 
 ---
 
@@ -11,7 +11,8 @@ This utility is part of the `RIID-gui` workspace repository and links with the d
 * **Strict Live-Time Tracking**: Polling engine loops every second to monitor actual hardware clocks (`tmr_c`), neutralizing count-rate dead-time errors.
 * **Ortec `.Spe` Compliance**: Exports standard ASCII layout profiles automatically injecting custom structured detector headers.
 * **Dynamic Profile Database & Auto-Registration**: Reads device digital pulse processing (DPP) settings from `detectors.json`. If a connected device serial number is unknown, the system automatically appends a new profile block with baseline defaults to the database.
-* **Automated Synchronized Storage**: Saves both the spectrum data (`.spe`) and its corresponding visualization plot (`.png`) using synchronized names incorporating the hardware serial number under the `spectra/` directory.
+* **Sequential Batch Recording (N Runs)**: Supports capturing a sequential series of spectra within a single call. Batch runs freeze the initial call timestamp across all generated datasets to maintain group continuity.
+* **Automated Headless Storage**: By default, saves both the spectrum data (`.spe`) and its corresponding visualization plot (`.png`) silently under the `spectra/` directory. Interactive popups are disabled by default to support remote or automated lab execution.
 * **Localized Dual-Pipe Logging**: Saves background debug stack traces to a rolling file engine (`spectrum_recorder.log`) while keeping the primary terminal clean.
 * **Native UV Workspace System**: Fully integrated with the native package management workspace layout for zero-configuration editable installs.
 
@@ -59,31 +60,36 @@ Always execute commands using `uv run` inside the `utils/spectrum_recorder` dire
 cd utils/spectrum_recorder
 ```
 
-### 1. Standard Collection (Automatic S/N + Timestamp Injection)
-Collects a spectrum for 60 live-time seconds. It automatically detects the board's serial number, loads any existing specific parameters from the JSON profile, and outputs files using synchronized naming models:
+### 1. Standard Collection (Headless Storage by Default)
+Collects a single spectrum for 60 live-time seconds. It automatically detects the board's serial number, loads settings from the JSON database profile, and writes files directly to the storage folder without flashing any display windows:
 ```bash
 uv run main.py --collection_time=60 --output=cs137
 ```
-* **Output Spectrum:** `spectra/cs137_210328BEXXXXX_20260625_172000.spe`
-* **Output Chart:** `spectra/cs137_210328BEXXXXX_20260625_172000.png`
+* **Output Spectrum:** `spectra/cs137_210328BE437AB_20260625_172000.spe`
+* **Output Chart:** `spectra/cs137_210328BE437AB_20260625_172000.png`
 
-### 2. Manual CLI Override Parameter Setup
-Specifies explicit overriding digital pulse processing parameters via the terminal. This uses a strict 3-tier hierarchy prioritizing terminal inputs over database profiles and script fallbacks:
+### 2. Batch Sequential Run with Shared Session Timestamps
+Collects a sequence series of 3 spectra automatically within a single call. All generated files are tracked with a sequence string index (`runXX`) and share the exact same starting timestamp:
 ```bash
-uv run main.py --collection_time=120 --output=co60_high_cps --no_timestamp --shaper_s_tau_pk=1.8e-6 --vga_gain_coarse=4.5
+uv run main.py --collection_time=30 -n 3 --output=decay_series
 ```
-* **Output Spectrum:** `spectra/co60_high_cps_210328BEXXXXX.spe`
-* **Output Chart:** `spectra/co60_high_cps_210328BEXXXXX.png`
+* **Output Files (Run 1):** `spectra/decay_series_210328BE437AB_run01_20260625_174012.spe` (and `.png`)
+* **Output Files (Run 2):** `spectra/decay_series_210328BE437AB_run02_20260625_174012.spe` (and `.png`)
+* **Output Files (Run 3):** `spectra/decay_series_210328BE437AB_run03_20260625_174012.spe` (and `.png`)
 
-### 3. Headless Performance Batch Run
-Saves only the raw spectrum dataset into the `spectra/` directory while completely suppressing chart rendering on disk and preventing interactive graphical screen popups:
+### 3. Displaying Interactive Visualization Plots
+If you want to visually verify the captured photopeaks on screen upon session completion, pass the explicit plotting flag:
 ```bash
-uv run main.py --collection_time=30 --output=headless_run --no_save_img --no_plot
+uv run main.py --collection_time=60 --output=peak_check --show_plot
 ```
-* **Output Spectrum:** `spectra/headless_run_210328BEXXXXX_20260625_172315.spe`
-* **Output Chart:** None.
 
-### 4. Hardware Debug Output
+### 4. High-Performance Headless Run (No Plot Saving)
+Saves only the raw spectrum dataset while completely skipping rendering operations on disk to maximize file-writing speeds:
+```bash
+uv run main.py --collection_time=10 --output=fast_run --no_save_img
+```
+
+### 5. Hardware Debug Output Telemetry
 Launches the tracking sequence displaying a live terminal view of the underlying hardware register ticks second by second:
 ```bash
 uv run main.py --collection_time=10 --verbose
@@ -101,13 +107,14 @@ uv run main.py --help
 ### Core Application Flags
 * `--collection_time` `INT` (**Mandatory**): Total target collection window specified in live-time seconds.
 * `--output` `STR` (Default: `"spectrum"`): Base file prefix. Files are stored inside the `spectra/` directory.
+* `-n`, `--spectra_count` `INT` (Default: `1`): Number of sequential spectra (N) to record automatically.
 * `--no_timestamp`: Disables automatic date-time strings from being injected into the file names.
-* `--no_plot`: Prevents the interactive user graphical layout window from triggering upon completion.
+* `--show_plot`: Enables displaying the interactive graphic window upon completion (Disabled by default).
 * `--no_save_img`: Explicitly disables generating and writing the corresponding `.png` plot file to disk.
 * `--verbose`: Streams live serial port interaction with the hardware (DAQ/MCA) directly into your active console screen.
 
 ### Digital Pulse Processing (DPP) Settings Matrix
-*Note: If omitted from both the CLI and `detectors.json`, parameters fall back to their default values.*
+*Note: If omitted from both the CLI parameters and `detectors.json`, settings fall back to their baseline default values.*
 
 * `--tau_d` `FLOAT`: Detector signal pulse shape decay constant time (s).
 * `--tau_r` `FLOAT`: Detector signal pulse shape rise constant time (s).
