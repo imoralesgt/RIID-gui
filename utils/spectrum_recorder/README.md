@@ -64,23 +64,23 @@ Collects a spectrum for 60 live-time seconds. It automatically detects the board
 ```bash
 uv run main.py --collection_time=60 --output=cs137
 ```
-* **Output Spectrum:** `spectra/cs137_210328BE437AB_20260625_172000.spe`
-* **Output Chart:** `spectra/cs137_210328BE437AB_20260625_172000.png`
+* **Output Spectrum:** `spectra/cs137_210328BEXXXXX_20260625_172000.spe`
+* **Output Chart:** `spectra/cs137_210328BEXXXXX_20260625_172000.png`
 
 ### 2. Manual CLI Override Parameter Setup
 Specifies explicit overriding digital pulse processing parameters via the terminal. This uses a strict 3-tier hierarchy prioritizing terminal inputs over database profiles and script fallbacks:
 ```bash
 uv run main.py --collection_time=120 --output=co60_high_cps --no_timestamp --shaper_s_tau_pk=1.8e-6 --vga_gain_coarse=4.5
 ```
-* **Output Spectrum:** `spectra/co60_high_cps_210328BE437AB.spe`
-* **Output Chart:** `spectra/co60_high_cps_210328BE437AB.png`
+* **Output Spectrum:** `spectra/co60_high_cps_210328BEXXXXX.spe`
+* **Output Chart:** `spectra/co60_high_cps_210328BEXXXXX.png`
 
 ### 3. Headless Performance Batch Run
 Saves only the raw spectrum dataset into the `spectra/` directory while completely suppressing chart rendering on disk and preventing interactive graphical screen popups:
 ```bash
 uv run main.py --collection_time=30 --output=headless_run --no_save_img --no_plot
 ```
-* **Output Spectrum:** `spectra/headless_run_210328BE437AB_20260625_172315.spe`
+* **Output Spectrum:** `spectra/headless_run_210328BEXXXXX_20260625_172315.spe`
 * **Output Chart:** None.
 
 ### 4. Hardware Debug Output
