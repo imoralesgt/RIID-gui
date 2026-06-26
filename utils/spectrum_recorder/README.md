@@ -65,22 +65,22 @@ Collects a single spectrum for 60 live-time seconds. It automatically detects th
 ```bash
 uv run main.py --collection_time=60 --output=cs137
 ```
-* **Output Spectrum:** `spectra/cs137_210328BE437AB_20260625_172000.spe`
-* **Output Chart:** `spectra/cs137_210328BE437AB_20260625_172000.png`
+* **Output Spectrum:** `spectra/20260625_172000_210328BEXXXXX_cs137.spe`
+* **Output Plot:** `spectra/20260625_172000_210328BEXXXXX_cs137.png`
 
 ### 2. Batch Sequential Run with Shared Session Timestamps
 Collects a sequence series of 3 spectra automatically within a single call. All generated files are tracked with a sequence string index (`runXX`) and share the exact same starting timestamp:
 ```bash
 uv run main.py --collection_time=30 -n 3 --output=decay_series
 ```
-* **Output Files (Run 1):** `spectra/decay_series_210328BE437AB_run01_20260625_174012.spe` (and `.png`)
-* **Output Files (Run 2):** `spectra/decay_series_210328BE437AB_run02_20260625_174012.spe` (and `.png`)
-* **Output Files (Run 3):** `spectra/decay_series_210328BE437AB_run03_20260625_174012.spe` (and `.png`)
+* **Output Files (Run 1):** `spectra/20260625_174012_210328BE437AB_decay_series_run01.spe` (and `.png`)
+* **Output Files (Run 2):** `spectra/20260625_174012_210328BE437AB_decay_series_run02.spe` (and `.png`)
+* **Output Files (Run 3):** `spectra/20260625_174012_210328BE437AB_decay_series_run03.spe` (and `.png`)
 
-### 3. Injecting Custom Energy Calibration via CLI
+### 3. Setting Custom Energy Calibration Coefficients via CLI
 Allows overruling the local database constants dynamically through the console command for rapid energy characterization checks without sending these math properties to the physical DPP board registers:
 ```bash
-uv run main.py --collection_time=60 --output=calib_run --calib_a0=-10.25 --calib_a1=0.355 --calib_a2=0.00001
+uv run main.py --collection_time=60 --output=calib_run --calib_a0=-10.25 --calib_a1=0.355 --calib_a2=1e-7
 ```
 
 ### 4. Displaying Interactive Visualization Plots
@@ -127,9 +127,9 @@ uv run main.py --help
 ### Off-Board Software Calibration Parameters
 *Note: These factors are only injected into the exported spectrum file metadata and are not written to the DAQ/MCA board.*
 
-* `--calib_a0` `FLOAT` (Default: `0.0`): Calibration coefficient a0 (Channel-to-Energy Offset block).
-* `--calib_a1` `FLOAT` (Default: `1.0`): Calibration coefficient a1 (Channel-to-Energy Linear block).
-* `--calib_a2` `FLOAT` (Default: `2.0`): Calibration coefficient a2 (Channel-to-Energy Quadratic block).
+* `--calib_a0` `FLOAT` (Default: `0.0`): Calibration coefficient a0 (Channel-to-Energy Offset).
+* `--calib_a1` `FLOAT` (Default: `1.0`): Calibration coefficient a1 (Channel-to-Energy Linear).
+* `--calib_a2` `FLOAT` (Default: `0.0`): Calibration coefficient a2 (Channel-to-Energy Quadratic block).
 
 ---
 

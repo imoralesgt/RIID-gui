@@ -31,6 +31,8 @@ class ConfigurationManager:
         "calib_a2": 2.0,
     }
 
+    OUTPUT_FOLDER = "spectra"
+
     def __init__(self):
         """Initializes the ConfigurationManager and parses runtime CLI options."""
         self.args = self._parse_arguments()
@@ -159,22 +161,46 @@ class ConfigurationManager:
                 logger.debug("Parameter '%s' resolved via Tier 3 [Script Default]: %s", key, script_default)
                 
         return resolved
+    
+    def __remove_ext_filename(self, filename : str) -> str:
+        """Removes the file extension from a filename, if present.
+        
+        Args:
+            filename (str): Input filename.
+
+        Returns:
+            str: Filename without extension
+        """
+        if "." in filename:
+            filename = filename.split('.')[0]
+        
+        return filename
 
     def generate_filename(self, serial_number: str, timestamp_str: str, loop_index: int = None) -> str:
-        """Processes parameters to calculate file save destinations inside 'spectra/'."""
-        target_dir = "spectra"
+        """Processes parameters to calculate file save destinations inside the output folder.
+        
+        Args:
+            serial_number (str): Device serial number.
+            timestamp_str (str): Timestamp string for the current session.
+            loop_index (int, optional): Sequential run index.
+
+        Returns:
+            str: Generated filename
+        """
+        target_dir = self.OUTPUT_FOLDER
         os.makedirs(target_dir, exist_ok=True)
 
-        base_name = self.args.output[:-4] if self.args.output.endswith(".spe") else self.args.output
-        filename = f"{base_name}_{serial_number}"
+        if not self.args.no_timestamp:
+            filename = f"{timestamp_str}_{serial_number}"
+        else:
+            filename = serial_number
+      
+        base_name = self.__remove_ext_filename(self.args.output)      
+        filename = f"{filename}_{base_name}"
         
         if loop_index is not None:
             filename = f"{filename}_run{loop_index:02d}"
 
-        if not self.args.no_timestamp:
-            filename = f"{filename}_{timestamp_str}"
-
-        filename = f"{filename}.spe"
         if not os.path.isabs(filename):
             return os.path.join(target_dir, filename)
         return filename
@@ -288,9 +314,9 @@ class SpectrumRecorderApp:
         logger.info("Metrics -> Live-Time: %.2fs | Real-Time: %.2fs", final_live, final_real)
 
         # Enviar el diccionario de configuraciones resueltas para inyectar los coeficientes
-        self._export_spe_file(final_filename, spectrum, final_live, final_real, dpp_settings)
+        self._export_spe_file(f"{final_filename}.spe", spectrum, final_live, final_real, dpp_settings)
 
-        img_path = final_filename[:-4] + ".png" if not self.config_mgr.args.no_save_img else None
+        img_path = final_filename + ".png" if not self.config_mgr.args.no_save_img else None
         if img_path or self.config_mgr.args.show_plot:
             self._render_plot(spectrum, img_path)
 
@@ -307,7 +333,7 @@ class SpectrumRecorderApp:
             
             # Almacenar de forma dinámica los coeficientes de calibración resueltos por la jerarquía de 3 niveles
             f.write("$MCA_CAL:\n3\n")
-            f.write(f"{dpp_settings['calib_a0']:.3f} {dpp_settings['calib_a1']:.3f} {dpp_settings['calib_a2']:.3f}\n")
+            f.write(f"{dpp_settings['calib_a0']:.7e} {dpp_settings['calib_a1']:.7e} {dpp_settings['calib_a2']:.7e}\n")
             
             f.write("$ENDRECORD:\n")
 
