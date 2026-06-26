@@ -9,7 +9,7 @@ This utility is part of the `RIID-gui` workspace repository and links with the d
 ## Key Features
 
 * **Strict Live-Time Tracking**: Polling engine loops every second to monitor actual hardware clocks (`tmr_c`), neutralizing count-rate dead-time errors.
-* **Ortec `.Spe` Compliance**: Exports standard ASCII layout profiles automatically injecting custom structured detector headers and energy calibration coefficients ($MCA_CAL).
+* **`.Spe` Compliance**: Exports standard ASCII layout profiles automatically injecting custom structured detector headers and energy calibration coefficients ($MCA_CAL).
 * **Dynamic Profile Database & Auto-Registration**: Reads device digital pulse processing (DPP) settings and energy calibration factors from `detectors.json`. If a connected device serial number is unknown, the system automatically appends a new profile block with baseline defaults to the database.
 * **Sequential Batch Recording (N Runs)**: Supports capturing a sequential series of spectra within a single call. Batch runs freeze the initial call timestamp across all generated datasets to maintain group continuity.
 * **Automated Headless Storage**: By default, saves both the spectrum data (`.spe`) and its corresponding visualization plot (`.png`) silently under the `spectra/` directory. Interactive popups are disabled by default to support remote or automated lab execution.
@@ -105,7 +105,7 @@ uv run main.py --help
 ```
 
 ### Core Application Flags
-* `--collection_time` `INT` (**Mandatory**): Total target collection window specified in live-time seconds.
+* `--collection_time` `INT` (Default: `300`): Total target collection window specified in live-time seconds.
 * `--output` `STR` (Default: `"spectrum"`): Base file prefix. Files are stored inside the `spectra/` directory.
 * `-n`, `--spectra_count` `INT` (Default: `1`): Number of sequential spectra (N) to record automatically.
 * `--no_timestamp`: Disables automatic date-time strings from being injected into the file names.

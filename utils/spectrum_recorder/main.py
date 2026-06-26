@@ -53,7 +53,7 @@ class ConfigurationManager:
 
         # Application parameters (Mandatory selection)
         parser.add_argument(
-            "--collection_time", type=int, required=True,
+            "--collection_time", type=int, default=300,
             help="Spectrum collection live-time in SECONDS",
         )
         parser.add_argument(
