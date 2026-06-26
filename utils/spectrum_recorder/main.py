@@ -28,7 +28,7 @@ class ConfigurationManager:
         "invert_pulse": False,
         "calib_a0": 0.0,
         "calib_a1": 1.0,
-        "calib_a2": 2.0,
+        "calib_a2": 0.0,
     }
 
     OUTPUT_FOLDER = "spectra"
@@ -327,14 +327,12 @@ class SpectrumRecorderApp:
             f.write(f"$SPEC_ID:\nNSIL-Det-{self.serial_number}\n")
             f.write(f"$DATE_MEA:\n{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}\n")
             f.write(f"$MEAS_TIM:\n{live:.2f} {real:.2f}\n")
+            f.write("$MCA_CAL:\n3\n")
+            f.write(f"{dpp_settings['calib_a0']:.7e} {dpp_settings['calib_a1']:.7e} {dpp_settings['calib_a2']:.7e}\n")
             f.write(f"$DATA:\n0 {len(spectrum) - 1}\n")
             for counts in spectrum:
                 f.write(f"{int(counts)}\n")
-            
-            # Almacenar de forma dinámica los coeficientes de calibración resueltos por la jerarquía de 3 niveles
-            f.write("$MCA_CAL:\n3\n")
-            f.write(f"{dpp_settings['calib_a0']:.7e} {dpp_settings['calib_a1']:.7e} {dpp_settings['calib_a2']:.7e}\n")
-            
+
             f.write("$ENDRECORD:\n")
 
     def _render_plot(self, spectrum: list, img_path: str = None) -> None:
