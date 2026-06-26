@@ -4,48 +4,69 @@
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 2.8,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -6.48382,
+    "calib_a1": 1.00773,
+    "calib_a2": 0.00000
   },
   "210328BE40F5B": {
     "vga_gain_coarse": 4.5,
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 2.9,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -6.67147,
+    "calib_a1": 1.00459,
+    "calib_a2": 0.00000
   },
   "210328BE4028B": {
     "vga_gain_coarse": 4.05,
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 2.4,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -6.88761,
+    "calib_a1": 1.00418,
+    "calib_a2": 0.00000
   },
   "210328BE403DB": {
     "vga_gain_coarse": 5.17,
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 2.4,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -6.89261,
+    "calib_a1": 1.00538,
+    "calib_a2": 0.00000
   },
   "210328BE3C07B": {
     "vga_gain_coarse": 4.92,
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 2.75,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -7.23489,
+    "calib_a1": 1.01094,
+    "calib_a2": 0.00000
   },
   "210328BE425FB": {
     "vga_gain_coarse": 4.45,
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 4.0,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -5.93674,
+    "calib_a1": 1.00447,
+    "calib_a2": 0.00000
   },
   "210328BE437AB": {
     "vga_gain_coarse": 6.4,
     "shaper_s_tau_pk": 2.5e-6,
     "shaper_s_tau_pk_top": 1.0e-6,
     "blr_s_threshold_gain": 2.95,
-    "smoothing_factor": 2
+    "smoothing_factor": 2,
+    "calib_a0": -7.16648,
+    "calib_a1": 0.99252,
+    "calib_a2": 0.00000
   }
 }

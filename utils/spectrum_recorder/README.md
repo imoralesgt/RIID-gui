@@ -9,8 +9,8 @@ This utility is part of the `RIID-gui` workspace repository and links with the d
 ## Key Features
 
 * **Strict Live-Time Tracking**: Polling engine loops every second to monitor actual hardware clocks (`tmr_c`), neutralizing count-rate dead-time errors.
-* **Ortec `.Spe` Compliance**: Exports standard ASCII layout profiles automatically injecting custom structured detector headers.
-* **Dynamic Profile Database & Auto-Registration**: Reads device digital pulse processing (DPP) settings from `detectors.json`. If a connected device serial number is unknown, the system automatically appends a new profile block with baseline defaults to the database.
+* **Ortec `.Spe` Compliance**: Exports standard ASCII layout profiles automatically injecting custom structured detector headers and energy calibration coefficients ($MCA_CAL).
+* **Dynamic Profile Database & Auto-Registration**: Reads device digital pulse processing (DPP) settings and energy calibration factors from `detectors.json`. If a connected device serial number is unknown, the system automatically appends a new profile block with baseline defaults to the database.
 * **Sequential Batch Recording (N Runs)**: Supports capturing a sequential series of spectra within a single call. Batch runs freeze the initial call timestamp across all generated datasets to maintain group continuity.
 * **Automated Headless Storage**: By default, saves both the spectrum data (`.spe`) and its corresponding visualization plot (`.png`) silently under the `spectra/` directory. Interactive popups are disabled by default to support remote or automated lab execution.
 * **Localized Dual-Pipe Logging**: Saves background debug stack traces to a rolling file engine (`spectrum_recorder.log`) while keeping the primary terminal clean.
@@ -61,7 +61,7 @@ cd utils/spectrum_recorder
 ```
 
 ### 1. Standard Collection (Headless Storage by Default)
-Collects a single spectrum for 60 live-time seconds. It automatically detects the board's serial number, loads settings from the JSON database profile, and writes files directly to the storage folder without flashing any display windows:
+Collects a single spectrum for 60 live-time seconds. It automatically detects the board's serial number, loads settings and calibration coefficients from the JSON database profile, and writes files directly to the storage folder without flashing any display windows:
 ```bash
 uv run main.py --collection_time=60 --output=cs137
 ```
@@ -77,16 +77,16 @@ uv run main.py --collection_time=30 -n 3 --output=decay_series
 * **Output Files (Run 2):** `spectra/decay_series_210328BE437AB_run02_20260625_174012.spe` (and `.png`)
 * **Output Files (Run 3):** `spectra/decay_series_210328BE437AB_run03_20260625_174012.spe` (and `.png`)
 
-### 3. Displaying Interactive Visualization Plots
+### 3. Injecting Custom Energy Calibration via CLI
+Allows overruling the local database constants dynamically through the console command for rapid energy characterization checks without sending these math properties to the physical DPP board registers:
+```bash
+uv run main.py --collection_time=60 --output=calib_run --calib_a0=-10.25 --calib_a1=0.355 --calib_a2=0.00001
+```
+
+### 4. Displaying Interactive Visualization Plots
 If you want to visually verify the captured photopeaks on screen upon session completion, pass the explicit plotting flag:
 ```bash
 uv run main.py --collection_time=60 --output=peak_check --show_plot
-```
-
-### 4. High-Performance Headless Run (No Plot Saving)
-Saves only the raw spectrum dataset while completely skipping rendering operations on disk to maximize file-writing speeds:
-```bash
-uv run main.py --collection_time=10 --output=fast_run --no_save_img
 ```
 
 ### 5. Hardware Debug Output Telemetry
@@ -124,6 +124,13 @@ uv run main.py --help
 * `--blr_s_threshold_gain` `FLOAT`: Slow baseline restorer noise floor tracking step multiplier.
 * `--smoothing_factor` `INT`: Input moving average filtering constraint block (`1`, `2`, `4`, or `8`).
 
+### Off-Board Software Calibration Parameters
+*Note: These factors are only injected into the exported spectrum file metadata and are not written to the DAQ/MCA board.*
+
+* `--calib_a0` `FLOAT` (Default: `0.0`): Calibration coefficient a0 (Channel-to-Energy Offset block).
+* `--calib_a1` `FLOAT` (Default: `1.0`): Calibration coefficient a1 (Channel-to-Energy Linear block).
+* `--calib_a2` `FLOAT` (Default: `2.0`): Calibration coefficient a2 (Channel-to-Energy Quadratic block).
+
 ---
 
 ## Diagnostic Pipelines & Outputs
@@ -132,4 +139,4 @@ uv run main.py --help
 Any runtime issue, physical communication link interruption, or unexpected uncaught runtime crash is safely trapped by the global `sys.excepthook` interceptor framework and dumped directly into **`spectrum_recorder.log`** with full tracing context blocks for field debugging support.
 
 ### 2. Hardware Log File
-The DAQ/MCA API backend also dumps its log into the **daq_mca.log** file, in case a low-level hardware diagnostic is required.
+The DAQ/MCA API backend also dumps its log into the **`daq_mca.log`** file, in case a low-level hardware diagnostic is required.

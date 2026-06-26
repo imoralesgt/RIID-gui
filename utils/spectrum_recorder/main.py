@@ -26,6 +26,9 @@ class ConfigurationManager:
         "blr_s_threshold_gain": 3.0,
         "smoothing_factor": 2,
         "invert_pulse": False,
+        "calib_a0": 0.0,
+        "calib_a1": 1.0,
+        "calib_a2": 2.0,
     }
 
     def __init__(self):
@@ -82,6 +85,11 @@ class ConfigurationManager:
         parser.add_argument("--vga_gain_coarse", type=float, default=None, help="Analog coarse gain before ADC")
         parser.add_argument("--blr_s_threshold_gain", type=float, default=None, help="BLR threshold gain filter")
         parser.add_argument("--smoothing_factor", type=int, default=None, help="SNR moving average filter")
+        
+        # Calibration options
+        parser.add_argument("--calib_a0", type=float, default=None, help="Calibration coefficient a0 (Offset)")
+        parser.add_argument("--calib_a1", type=float, default=None, help="Calibration coefficient a1 (Linear)")
+        parser.add_argument("--calib_a2", type=float, default=None, help="Calibration coefficient a2 (Quadratic)")
 
         return parser.parse_args()
 
@@ -153,16 +161,7 @@ class ConfigurationManager:
         return resolved
 
     def generate_filename(self, serial_number: str, timestamp_str: str, loop_index: int = None) -> str:
-        """Processes parameters to calculate file save destinations inside 'spectra/'.
-
-        Args:
-            serial_number: Hardware serial number string extracted from the detector.
-            timestamp_str: Pre-calculated frozen date-time string shared across the session.
-            loop_index: Optional integer tracking the current acquisition count loop.
-
-        Returns:
-            str: Absolute or relative target destination file path.
-        """
+        """Processes parameters to calculate file save destinations inside 'spectra/'."""
         target_dir = "spectra"
         os.makedirs(target_dir, exist_ok=True)
 
@@ -216,7 +215,6 @@ class SpectrumRecorderApp:
             plt.switch_backend('Agg')
             logger.debug("Headless rendering context activated via matplotlib 'Agg' backend engine.")
 
-        # CRITICAL FIX: Freeze the session timestamp exactly when the call begins
         session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         daq_api = DaqCommands(
@@ -271,9 +269,8 @@ class SpectrumRecorderApp:
                 spectrum = daq_api.read_spectrum()
                 timers_final = daq_api.timers_read()
                 
-                # Pass run index only if N > 1, along with the frozen session timestamp
                 loop_param = run_idx if total_runs > 1 else None
-                self._save_session_outputs(spectrum, timers_final, session_timestamp, loop_index=loop_param)
+                self._save_session_outputs(spectrum, timers_final, session_timestamp, dpp_settings, loop_index=loop_param)
 
         except Exception as e:
             logger.error("Acquisition failed due to physical hardware error.", exc_info=True)
@@ -281,24 +278,23 @@ class SpectrumRecorderApp:
             daq_api.close()
             logger.info("Serial communication interface channel closed safely.")
 
-    def _save_session_outputs(self, spectrum: list, timers_final: dict, session_timestamp: str, loop_index: int = None) -> None:
+    def _save_session_outputs(self, spectrum: list, timers_final: dict, session_timestamp: str, dpp_settings: dict, loop_index: int = None) -> None:
         """Internal worker logic managing file export and plotting executions."""
         final_live = timers_final["tmr_c"] / 1000.0
         final_real = timers_final["tmr_a"] / 1000.0
-        
-        # Call generate_filename passing the frozen timestamp and loop index explicitly
         final_filename = self.config_mgr.generate_filename(self.serial_number, session_timestamp, loop_index=loop_index)
 
         logger.info("Total Counts Collected: %d", sum(spectrum))
         logger.info("Metrics -> Live-Time: %.2fs | Real-Time: %.2fs", final_live, final_real)
 
-        self._export_spe_file(final_filename, spectrum, final_live, final_real)
+        # Enviar el diccionario de configuraciones resueltas para inyectar los coeficientes
+        self._export_spe_file(final_filename, spectrum, final_live, final_real, dpp_settings)
 
         img_path = final_filename[:-4] + ".png" if not self.config_mgr.args.no_save_img else None
         if img_path or self.config_mgr.args.show_plot:
             self._render_plot(spectrum, img_path)
 
-    def _export_spe_file(self, path: str, spectrum: list, live: float, real: float) -> None:
+    def _export_spe_file(self, path: str, spectrum: list, live: float, real: float, dpp_settings: dict) -> None:
         """Generates standard ASCII ORTEC format dataset output entries."""
         logger.info("Writing ORTEC dataset to path: %s", path)
         with open(path, "w", encoding="ascii") as f:
@@ -308,14 +304,19 @@ class SpectrumRecorderApp:
             f.write(f"$DATA:\n0 {len(spectrum) - 1}\n")
             for counts in spectrum:
                 f.write(f"{int(counts)}\n")
-            f.write("$MCA_CAL:\n3\n0.000 1.000 0.000\n$ENDRECORD:\n")
+            
+            # Almacenar de forma dinámica los coeficientes de calibración resueltos por la jerarquía de 3 niveles
+            f.write("$MCA_CAL:\n3\n")
+            f.write(f"{dpp_settings['calib_a0']:.3f} {dpp_settings['calib_a1']:.3f} {dpp_settings['calib_a2']:.3f}\n")
+            
+            f.write("$ENDRECORD:\n")
 
     def _render_plot(self, spectrum: list, img_path: str = None) -> None:
         """Builds configuration templates and draws spectrum charts."""
         plt.style.use("ggplot")
         plt.figure(figsize=(10, 5))
         plt.plot(range(len(spectrum)), spectrum, label="MCA Counts", linewidth=1.0)
-        plt.title(f"Captured Energy Spectrum - S/N: {self.secret_sn if hasattr(self, 'secret_sn') else self.serial_number}", fontsize=12, fontweight="bold")
+        plt.title(f"Captured Energy Spectrum - S/N: {self.serial_number}", fontsize=12, fontweight="bold")
         plt.xlabel("ADC Channel Bin Number", fontsize=10)
         plt.ylabel("Event Count (N)", fontsize=10)
         plt.yscale("log")
@@ -343,7 +344,7 @@ sys.excepthook = handle_unhandled_exception
 
 
 def main():
-    """Main application for the automated spectrum recorder application.
+    """Main application launcher initializing object orchestration workflows.
     
     This execution lifecycle follows a strict pipeline:
       1. Instantiates a ConfigurationManager to catch and sanitize user console input.
@@ -353,60 +354,18 @@ def main():
       5. Runs the 3-Tier matrix resolving engine (CLI beats JSON Profile, which beats Defaults).
       6. Runs up a permanent hardware link session and loops acquisition N sequential times.
     """
-    # -------------------------------------------------------------------------
-    # STEP 1: Process User Runtime Parameters & Define Flags
-    # -------------------------------------------------------------------------
-    # Create the config object instance. This automatically runs argparse validation.
-    # If required arguments like --collection_time are missing, execution aborts here.
     config_mgr = ConfigurationManager()
-    
-    # -------------------------------------------------------------------------
-    # STEP 2: Configure System Output Telemetry (Dual-Pipe Setup)
-    # -------------------------------------------------------------------------
-    # Set up logging handlers. Standard logs print to 'spectrum_recorder.log' down
-    # to DEBUG level. Console stream displays WARNINGS unless --verbose is passed.
     config_mgr.setup_logging()
-    logger.debug("Core application initialization sequence triggered successfully.")
 
-    # -------------------------------------------------------------------------
-    # STEP 3: Initialize App Space & Probe Detector Identity (Identity Check)
-    # -------------------------------------------------------------------------
-    # Instantiate the main application worker, passing the active configuration.
     app = SpectrumRecorderApp(config_mgr)
-    
-    # Open and close a fast serial communication link to fetch the DAQ/MCA
-    # Serial Number (S/N). This must occur BEFORE creating the DPP registers
-    # mapping, as the S/N defines parameter lookups.
     serial_number = app.probe_hardware_identity()
     
-    # -------------------------------------------------------------------------
-    # STEP 4: Profile Database Fetching & Auto-Registration Engine
-    # -------------------------------------------------------------------------
-    # Query 'detectors.json' searching for a record matching the parsed serial_number.
-    # If the key is entirely missing, this method automatically writes an entry for
-    # this device containing base script default variables back to disk.
     profile = config_mgr.load_json_profile(serial_number)
-    
-    # -------------------------------------------------------------------------
-    # STEP 5: Run Hierarchical Parameter Resolving Matrix (3-Tier Tree)
-    # -------------------------------------------------------------------------
-    # Map out the final digital pulse processing (DPP) properties dictionary.
-    # The resolution rules check priorities: CLI user flags overrule database JSON
-    # variables, and missing attributes fallback to hardcoded default values.
     dpp_settings = config_mgr.resolve_parameters(profile)
 
-    # -------------------------------------------------------------------------
-    # STEP 6: Execute Data Acquisition Sessions & Sequential Batch Processing
-    # -------------------------------------------------------------------------
-    # Launches the primary measurement routine. This establishes a UART connection,
-    # locks down a baseline execution session timestamp, configures DPP parameters
-    # into the DAQ/MCA (sends the parameters), clears multichannel analyzer bins,
-    # and tracks the acquisition loop N sequential times based on the
-    # provided flag.
     app.run_acquisition(dpp_settings)
 
 
 if __name__ == "__main__":
-    # Standard entry point execution anchor. sys.excepthook has been linked 
-    # upstream to catch any unexpected runtime failures and route them to log files.
     main()
+
