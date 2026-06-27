@@ -3,7 +3,7 @@ import logging
 # Initialize logging infrastructure
 logger = logging.getLogger("spectrum_recorder")
 
-# Official Corporate Light Theme Palette Attributes
+# Official IAEA Light Theme Palette Attributes
 BRAND_COLORS = {
     "primary": "#0069B4",       # IAEA Blue (Primary Focus)
     "secondary": "#333233",     # Dark Charcoal (Typography contrast)
@@ -19,16 +19,16 @@ HARDWARE_DEFAULTS = {
     "shaper_s_tau_pk": 2.5e-6, 
     "shaper_s_tau_pk_top": 1.0e-6,
     "vga_gain_coarse": 6.0, 
-    "blr_s_threshold_gain": 3.0, 
+    "blr_s_threshold_gain": 4.0, 
     "smoothing_factor": 2, 
     "invert_pulse": False,
-    "calib_a0": -5.90807, 
-    "calib_a1": 0.953311, 
-    "calib_a2": 4.16455e-05,
+    "calib_a0": 0, 
+    "calib_a1": 1, 
+    "calib_a2": 0,
     "Detector type": "NaI(Tl)", 
     "Detector geometry": "Cylindrical", 
     "Detector size": "3.8 cm diameter x 3.8 cm thick", 
     "Detector type number": "38B38/SIP-E3-X2",
-    "Detector serial number": "S1AA9205", 
+    "Detector serial number": "UNKNOWN", 
     "Analyzer name": "NSIL-DPP4SiPM"
 }

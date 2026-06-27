@@ -14,11 +14,11 @@ def assemble_ultra_compact_workspace():
         
         # LEFT CARD: Parameter Data Entry Matrices (w-[49%])
         with ui.card().classes('flex-1 p-3 rounded-lg border shadow-sm bg-white gap-1').style('width: 49%;'):
-            ui.label('Measurement Parameters Matrix').classes('text-sm font-bold').style(f"color: {BRAND_COLORS['primary']};")
+            ui.label('Measurement Parameters').classes('text-sm font-bold').style(f"color: {BRAND_COLORS['primary']};")
             
             with ui.tabs().classes('w-full dense border-b').style(f"color: {BRAND_COLORS['secondary']};") as panel_tabs:
-                tab_experimental = ui.tab('Experimental Environment (Volatile)').classes('text-xs p-1')
-                tab_calibration = ui.tab('Hardware & Calibration (JSON)').classes('text-xs p-1')
+                tab_experimental = ui.tab('Experiment settings').classes('text-xs p-1')
+                tab_calibration = ui.tab('Hardware & Calibration').classes('text-xs p-1')
 
             with ui.tab_panels(panel_tabs, value=tab_experimental).classes('w-full bg-transparent p-0 pt-2'):
                 with ui.tab_panel(tab_experimental).classes('space-y-1 p-0'):

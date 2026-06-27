@@ -26,7 +26,7 @@ def render_volatile_environment_tab(system: SpectrumAcquisitionSystem):
                  on_change=lambda e: system.runtime_metadata.update({'Material form': e.value})).props('dense outlined').classes('flex-1')
 
     with ui.row().classes('w-full justify-between items-center mt-2 mb-1'):
-        ui.label('Active Isotopic Standard Reference Radioactive Sources').classes('text-xs font-bold').style(f"color: {BRAND_COLORS['primary']};")
+        ui.label('Active Radioactive Sources').classes('text-xs font-bold').style(f"color: {BRAND_COLORS['primary']};")
     
     source_columns = [
         {'name': 'Isotope', 'label': 'Isotope', 'field': 'Isotope', 'align': 'left'},
@@ -75,11 +75,11 @@ def render_volatile_environment_tab(system: SpectrumAcquisitionSystem):
             })
             sources_table.rows = system.runtime_metadata['Sources']
             source_dialog.close()
-        ui.button('Add Row', icon='check', on_click=save_source_modal_form).props('dense color=primary')
+        ui.button('Add source', icon='check', on_click=save_source_modal_form).props('dense color=primary')
 
-    ui.button('Append New Radiation Source Element', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs mt-1').style(f"color: {BRAND_COLORS['primary']}; border-color: {BRAND_COLORS['primary']};")
+    ui.button('Append Radiation Source', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs mt-1').style(f"color: {BRAND_COLORS['primary']}; border-color: {BRAND_COLORS['primary']};")
     with ui.row().classes('w-full justify-between items-center mt-2 mb-1'):
-        ui.label('Experimental Shielding Materials / Absorbers Layer').classes('text-xs font-bold').style(f"color: {BRAND_COLORS['primary']};")
+        ui.label('Shielding Materials / Absorber Layers').classes('text-xs font-bold').style(f"color: {BRAND_COLORS['primary']};")
     
     shield_columns = [
         {'name': 'Material', 'label': 'Material Element Symbol', 'field': 'Material', 'align': 'left'},
@@ -113,9 +113,9 @@ def render_volatile_environment_tab(system: SpectrumAcquisitionSystem):
             system.runtime_metadata['Attenuators'].append({"Material": new_mat.value, "Thickness (mm)": new_thick.value})
             attenuators_table.rows = system.runtime_metadata['Attenuators']
             shield_dialog.close()
-        ui.button('Add Row', icon='check', on_click=save_shield_modal_form).props('dense color=primary')
+        ui.button('Add shielding', icon='check', on_click=save_shield_modal_form).props('dense color=primary')
 
-    ui.button('Append Shielding Attenuator Block', icon='add', on_click=shield_dialog.open).props('outline dense').classes('text-xs mt-1').style(f"color: {BRAND_COLORS['primary']}; border-color: {BRAND_COLORS['primary']};")
+    ui.button('Append Shielding', icon='add', on_click=shield_dialog.open).props('outline dense').classes('text-xs mt-1').style(f"color: {BRAND_COLORS['primary']}; border-color: {BRAND_COLORS['primary']};")
 
 
 def render_calibration_persistent_panel(system: SpectrumAcquisitionSystem, tab_calibration):
@@ -158,6 +158,8 @@ def render_calibration_persistent_panel(system: SpectrumAcquisitionSystem, tab_c
                 if system.save_hardware_db():
                     ui.notify("Hardware properties updated!", type="positive")
             ui.button('Commit Calibration Parameters', icon='save', on_click=save_profile_to_json_file).style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").classes('py-0.5 px-2 text-xs')
+
+
 def update_interactive_plotly_canvas(system: SpectrumAcquisitionSystem, plot_container, spectrum_data: list):
     """Repaints the active Plotly frame converting channels to keV using hardware coefficients."""
     plot_container.clear()
@@ -166,7 +168,7 @@ def update_interactive_plotly_canvas(system: SpectrumAcquisitionSystem, plot_con
         with plot_container, ui.column().classes('w-full h-[360px] items-center justify-center p-4 text-center text-zinc-400 gap-1'):
             ui.icon('analytics', size='lg').style(f"color: {BRAND_COLORS['accent']};")
             ui.label(f"Analyzer Channel Standby [S/N: {system.serial_number}]").classes('text-xs font-bold text-zinc-700')
-            ui.label("Configure parameters and click 'Start' to begin keV acquisition sequence.").classes('text-[10px] text-zinc-500')
+            ui.label("Configure parameters and click 'Start' to begin acquisition sequence.").classes('text-[10px] text-zinc-500')
         return
 
     num_channels = len(spectrum_data)
@@ -179,7 +181,7 @@ def update_interactive_plotly_canvas(system: SpectrumAcquisitionSystem, plot_con
     plotly_fig = {
         'data': [{'x': calibrated_energy_axis_kev, 'y': spectrum_data, 'type': 'scatter', 'mode': 'lines', 'line': {'color': BRAND_COLORS['crimson_trace'], 'width': 1.0}}],
         'layout': {
-            'title': {'text': f"Calibrated Energy Spectrum [S/N: {system.serial_number}]", 'font': {'size': 10, 'color': BRAND_COLORS['secondary']}},
+            'title': {'text': f"Energy Spectrum [S/N: {system.serial_number}]", 'font': {'size': 10, 'color': BRAND_COLORS['secondary']}},
             'xaxis': {'title': 'Energy (keV)', 'titlefont': {'size': 8}, 'tickfont': {'size': 7}, 'gridcolor': '#F3F4F6', 'autorange': True},
             'yaxis': {'title': 'Counts (N)', 'type': 'log', 'titlefont': {'size': 8}, 'tickfont': {'size': 7}, 'gridcolor': '#F3F4F6'},
             'margin': {'l': 35, 'r': 10, 't': 22, 'b': 22}, 'hovermode': 'x unified', 'plot_bgcolor': '#FFFFFF', 'paper_bgcolor': '#FFFFFF', 'showlegend': False
@@ -187,6 +189,8 @@ def update_interactive_plotly_canvas(system: SpectrumAcquisitionSystem, plot_con
     }
     with plot_container:
         ui.plotly(plotly_fig).classes('w-full h-[360px]')
+
+
 def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plot_container):
     """Assembles command hubs featuring button mutexes and multi-recording selectors."""
     with ui.row().classes('w-full gap-2 items-center justify-between mt-1 border-t pt-1'):
@@ -195,11 +199,12 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
         output_prefix_input = ui.input('Filename Prefix', value='spectrum_run').props('dense outlined').classes('flex-1 text-xs')
         
         with ui.row().classes('gap-1'):
-            start_btn = ui.button('Start', icon='play_arrow', on_click=lambda: ui.timer(0.01, execute_sequenced_acquisition, once=True))
+            start_btn = ui.button('Start', icon='play_arrow', on_click=lambda: ui.timer(0.1, execute_sequenced_acquisition, once=True))
             start_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF;").props('dense text-color=white')
             
             stop_btn = ui.button('Stop', icon='stop', on_click=force_abort_recording)
-            stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']}; color: #FFFFFF;").props('dense text-color=white disabled')
+            stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']}; color: #FFFFFF;").props('dense text-color=white')
+            stop_btn.disable()
 
     acquisition_progress = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1 mt-1').props('color=primary')
     status_label = ui.label('Status: Ready to acquire.').classes('text-xs font-mono text-zinc-500 q-my-none')
@@ -219,6 +224,9 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
         for run_idx in range(total_runs):
             if not is_recording_active:
                 break
+
+            if run_idx == 0:
+                ui.notify("Data recording started", type="positive")
                 
             status_label.set_text(f"Status: Configuring run {run_idx + 1} of {total_runs}...")
             acquisition_progress.set_value(0.0)
@@ -239,7 +247,7 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
                 if not is_recording_active:
                     daq_api.close()
                     acquisition_progress.set_value(0.0)
-                    status_label.set_text("Status: Sequenced acquisition aborted. Data discarded.")
+                    status_label.set_text("Status: Data acquisition aborted. Data discarded.")
                     start_btn.enable()
                     stop_btn.disable()
                     return
@@ -252,7 +260,7 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
                 acquisition_progress.set_value(min(elapsed_seconds / target_time, 1.0))
                 status_label.set_text(f"Status: Run [{run_idx + 1}/{total_runs}] -> Live-Time: {elapsed_seconds}/{target_time} s")
                 
-                if target_time > 10 and (elapsed_seconds - last_chart_update_s) >= 10:
+                if target_time > 5 and (elapsed_seconds - last_chart_update_s) >= 5:
                     intermediate_spectrum = daq_api.read_spectrum()
                     update_interactive_plotly_canvas(system, plot_container, intermediate_spectrum)
                     last_chart_update_s = elapsed_seconds
@@ -268,15 +276,19 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
             dc_offset_volts = -0.03  
             analyzer_offset_computed = (dc_offset_volts / 2.0) * num_channels * vga_gain
             
-            session_iso_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            file_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            time_now = datetime.now()
+
+            session_iso_date = time_now.strftime("%Y-%m-%d %H:%M:%S")
+            file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
             os.makedirs("spectra", exist_ok=True)
             
-            base_filepath = f"spectra/{file_stamp}_{system.serial_number}_{prefix}_run{run_idx:02d}"
+            base_filepath = f"spectra/{file_stamp}_{system.serial_number}_{prefix}_run{run_idx:04d}"
             update_interactive_plotly_canvas(system, plot_container, spectrum)
+
+            spectrum_id = f"{int(time_now.strftime("%Y%m%d%H%M%S"))}_{system.serial_number}_{prefix}_run{run_idx:04d}"
             
             json_output = {
-                "id": int(datetime.now().strftime("%Y%m%d%H%M%S")),
+                "id": spectrum_id,
                 "metadata": {
                     "Material type": system.runtime_metadata["Material type"], "Material form": system.runtime_metadata["Material form"],
                     "Sources": system.runtime_metadata["Sources"], "Attenuators": system.runtime_metadata["Attenuators"],
@@ -292,12 +304,13 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
             with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
                 json.dump(json_output, jf, indent=2)
             
+
             with open(f"{base_filepath}.spe", "w", encoding="ascii") as sf:
-                sf.write(f"$SPEC_ID:\nNSIL-Det-{system.serial_number}_Run{run_idx:02d}\n")
-                sf.write(f"$DATE_MEA:\n{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}\n")
+                sf.write(f"$SPEC_ID:\n{spectrum_id}\n")
+                sf.write(f"$DATE_MEA:\n{time_now.strftime('%m/%d/%Y %H:%M:%S')}\n")
                 sf.write(f"$MEAS_TIM:\n{final_live_s:.2f} {final_real_s:.2f}\n")
                 sf.write("$SPE_REM:\n")
-                sf.write(f"Sequence Run Index: {run_idx:02d}\n")
+                sf.write(f"Sequence Run Index: {run_idx:04d}\n")
                 sf.write(f"Material Type: {system.runtime_metadata['Material type']}\n")
                 sf.write(f"Analyzer Offset Key: {analyzer_offset_computed:.4f} keV\n")
                 sf.write(f"Analyzer Gain Key: {vga_gain:.4f} keV/ch\n")
@@ -309,7 +322,7 @@ def render_acquisition_telemetry_commands(system: SpectrumAcquisitionSystem, plo
                 sf.write("$ENDRECORD:\n")
 
         is_recording_active = False
-        status_label.set_text("Status: Sequenced measurements finished successfully.")
+        status_label.set_text("Status: Measurements finished successfully.")
         start_btn.enable()
         stop_btn.disable()
-        ui.notify("All records exported successfully!", type="positive", color='#B8BE54')
+        ui.notify("Datasets saved successfully!", type="positive", color='#B8BE54')

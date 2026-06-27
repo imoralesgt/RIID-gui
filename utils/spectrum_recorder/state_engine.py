@@ -48,8 +48,7 @@ class SpectrumAcquisitionSystem:
             self.firmware_version = str(daq.get_version())
             daq.close()
         except Exception as e:
-            self.serial_number = "210328BE437AB"
-            self.firmware_version = "v4.1.2-SiPM"
+            raise Exception(f"Hardware not found: {e}")
         
         if self.serial_number not in self.db:
             self.db[self.serial_number] = {k: v for k, v in HARDWARE_DEFAULTS.items()}
