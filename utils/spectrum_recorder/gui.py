@@ -12,7 +12,7 @@ def assemble_ultra_compact_workspace():
     # MAIN WORKSPACE ROW WRAPPER
     with ui.row().classes('w-full p-2 gap-2 items-stretch no-wrap'):
         
-        # LEFT CARD: Parameter Data Entry Matrices (w-[49%])
+        # LEFT CARD: Parameter Data Entry (w-[49%])
         with ui.card().classes('flex-1 p-3 rounded-lg border shadow-sm bg-white gap-1').style('width: 49%;'):
             ui.label('Measurement Parameters').classes('text-sm font-bold').style(f"color: {BRAND_COLORS['primary']};")
             

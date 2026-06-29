@@ -122,8 +122,9 @@ def render_calibration_persistent_panel(system: SpectrumAcquisitionSystem, tab_c
     """Assembles a space-saving micro calibration forms grid panel with integrated Advanced hardware parameters section."""
     with ui.tab_panel(tab_calibration).classes('space-y-1.5 p-0'):
         with ui.row().classes('w-full gap-2 mt-1'):
+            ui.label(f'MCA Serial Number: {system.serial_number}').classes('flex-1 mt-4').style(f"color: {BRAND_COLORS['primary']};")
             ui.input('Analyzer Name', value=system.hw_profile['Analyzer name'], on_change=lambda e: system.hw_profile.update({'Analyzer name': e.value})).props('dense outlined').classes('flex-1')
-            ui.input('Detector Type', value=system.hw_profile['Detector type'], on_change=lambda e: system.hw_profile.update({'Detector type': e.value})).props('dense outlined').classes('flex-1')
+            ui.input('Detector Type', value=system.hw_profile['Detector type'], on_change=lambda e: system.hw_profile.update({'Detector type': e.value})).props('dense outlined').classes('flex-1')            
         
         ui.input('Detector Size', value=system.hw_profile['Detector size'], on_change=lambda e: system.hw_profile.update({'Detector size': e.value})).props('dense outlined').classes('w-full')
         
@@ -167,7 +168,7 @@ def update_interactive_plotly_canvas(system: SpectrumAcquisitionSystem, plot_con
     if not spectrum_data:
         with plot_container, ui.column().classes('w-full h-[360px] items-center justify-center p-4 text-center text-zinc-400 gap-1'):
             ui.icon('analytics', size='lg').style(f"color: {BRAND_COLORS['accent']};")
-            ui.label(f"Analyzer Channel Standby [S/N: {system.serial_number}]").classes('text-xs font-bold text-zinc-700')
+            ui.label(f"Analyzer Channel Standby [Device S/N: {system.serial_number}]").classes('text-xs font-bold text-zinc-700')
             ui.label("Configure parameters and click 'Start' to begin acquisition sequence.").classes('text-[10px] text-zinc-500')
         return
 
