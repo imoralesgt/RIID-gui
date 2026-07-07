@@ -1,12 +1,19 @@
 [project]
 name = "gui"
 version = "0.1.0"
-description = "Graphical user interface for radioisotope identification using custom data acquisition system"
+description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fixedpoint>=1.0.1",
-    "numpy>=2.4.6",
-    "pdoc>=16.0.0",
-    "pyserial>=3.5",
+    "nicegui>=3.14.0",
+    "python-api"
 ]
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.uv.sources]
+python-api = { workspace = true }
