@@ -5,13 +5,15 @@ from config import HARDWARE_DEFAULTS, logger
 from core.daq_commands import DaqCommands
 
 class SpectrumAcquisitionSystem:
-    def __init__(self, json_path: str = "detectors.json"):
+    def __init__(self, json_path: str = "detectors.json", sources_path: str = "sources.json"):
         self.json_path = json_path
+        self.sources_path = sources_path
         self.serial_number = "UNKNOWN"
         self.firmware_version = "UNKNOWN"
         
-        # Hardware Database Layer
-        self.db = self._load_db()
+        # Hardware & Source Databases
+        self.db = self._load_json(self.json_path)
+        self.sources_db = self._load_json(self.sources_path)
         self.hw_profile = {} 
         
         # Volatile Operational State Container (GUI exclusive)
@@ -22,13 +24,13 @@ class SpectrumAcquisitionSystem:
             "Attenuators": []
         }
         
-    def _load_db(self) -> dict:
-        if os.path.exists(self.json_path):
+    def _load_json(self, path: str) -> dict:
+        if os.path.exists(path):
             try:
-                with open(self.json_path, "r", encoding="utf-8") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                logger.error("Error reading JSON database: %s", e)
+                logger.error("Error reading JSON database %s: %s", path, e)
         return {}
 
     def save_hardware_db(self) -> bool:
@@ -38,6 +40,15 @@ class SpectrumAcquisitionSystem:
             return True
         except Exception as e:
             logger.error("Failed to commit database updates: %s", e)
+            return False
+
+    def save_sources_db(self) -> bool:
+        try:
+            with open(self.sources_path, "w", encoding="utf-8") as f:
+                json.dump(self.sources_db, f, indent=2)
+            return True
+        except Exception as e:
+            logger.error("Failed to commit sources database updates: %s", e)
             return False
 
     def probe_device(self) -> str:

@@ -1,5 +1,6 @@
 {
   "210328BE3DC9B": {
+    "SYS-ID": "SYS01",
     "vga_gain_coarse": 4.65,
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
@@ -16,6 +17,7 @@
     "Analyzer name": "NSIL-DPP4SiPM-SYS01"
   },
   "210328BE40F5B": {
+    "SYS-ID": "SYS02",
     "vga_gain_coarse": 4.5,
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
@@ -32,6 +34,7 @@
     "Analyzer name": "NSIL-DPP4SiPM-SYS02"
   },
   "210328BE4028B": {
+    "SYS-ID": "SYS03",
     "vga_gain_coarse": 4.05,
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
@@ -48,6 +51,7 @@
     "Analyzer name": "NSIL-DPP4SiPM-SYS03"
   },
   "210328BE403DB": {
+    "SYS-ID": "SYS04",
     "vga_gain_coarse": 5.17,
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
@@ -64,6 +68,7 @@
     "Analyzer name": "NSIL-DPP4SiPM-SYS04"
   },
   "210328BE3C07B": {
+    "SYS-ID": "SYS05",
     "vga_gain_coarse": 4.92,
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
@@ -80,6 +85,7 @@
     "Analyzer name": "NSIL-DPP4SiPM-SYS05"
   },
   "210328BE425FB": {
+    "SYS-ID": "SYS06",
     "tau_d": 1.21e-06,
     "tau_r": 2.06e-07,
     "shaper_s_tau_pk": 2.5e-06,
@@ -99,6 +105,7 @@
     "Analyzer name": "NSIL-DPP4SiPM-SYS06"
   },
   "210328BE437AB": {
+    "SYS-ID": "SYS07",
     "tau_d": 1.21e-06,
     "tau_r": 2.06e-07,
     "shaper_s_tau_pk": 2.5e-06,
