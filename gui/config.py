@@ -13,7 +13,9 @@ BRAND_COLORS = {
 }
 
 # Physical baseline default parameters (Tier-3) for detectors.json database mapping
+# Physical baseline default parameters (Tier-3) for detectors.json mapping
 HARDWARE_DEFAULTS = {
+    "SYS-ID": "SYS-STANDBY",  
     "tau_d": 1.21e-6, 
     "tau_r": 0.206e-6, 
     "shaper_s_tau_pk": 2.5e-6, 
@@ -32,3 +34,4 @@ HARDWARE_DEFAULTS = {
     "Detector serial number": "UNKNOWN", 
     "Analyzer name": "NSIL-DPP4SiPM"
 }
+

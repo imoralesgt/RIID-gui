@@ -10,15 +10,18 @@ class HardwareCalibrationPanel:
     def render_layout(self):
         ui.markdown("⚙️ **Non-Volatile Instrument Profiles:** Calibration committed to records.").classes('text-xs text-zinc-600 q-mb-xs')
         with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
-            
-            # LEFT COLUMN: Non-Volatile Profiles & Energy Coefficients
             with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
                 with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3'):
                     with ui.row().classes('w-full gap-3 items-center'):
                         ui.label(f"Base S/N: {self.system.serial_number}").classes('text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded border')
-                        ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', 'SYS-STANDBY'), 
-                                 on_change=lambda e: self.system.hw_profile.update({'SYS-ID': e.value})).props('dense outlined').classes('w-28 text-xs')
-                        ui.input('Analyzer Model Name', value=self.system.hw_profile.get('Analyzer name', 'UNKNOWN'), on_change=lambda e: self.system.hw_profile.update({'Analyzer name': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        
+                        # FIXED: Binds directly to the compiled runtime configuration memory profiles
+                        self.sys_id_input = ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', 'SYS-STANDBY'), 
+                                                     on_change=lambda e: self.system.hw_profile.update({'SYS-ID': e.value})).props('dense outlined').classes('w-28 text-xs')
+                        
+                        self.analyzer_name_input = ui.input('Analyzer Model Name', value=self.system.hw_profile.get('Analyzer name', 'UNKNOWN'), 
+                                                             on_change=lambda e: self.system.hw_profile.update({'Analyzer name': e.value})).props('dense outlined').classes('flex-1 text-xs')
+
                     with ui.row().classes('w-full gap-3'):
                         ui.input('Detector Type Class', value=self.system.hw_profile.get('Detector type', 'NaI(Tl)'), on_change=lambda e: self.system.hw_profile.update({'Detector type': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         ui.input('Detector Geometrical Size', value=self.system.hw_profile.get('Detector size', ''), on_change=lambda e: self.system.hw_profile.update({'Detector size': e.value})).props('dense outlined').classes('flex-1 text-xs')
@@ -28,7 +31,7 @@ class HardwareCalibrationPanel:
                         ui.number('Offset / a0', value=self.system.hw_profile.get('calib_a0', 0.0), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a0': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         ui.number('Linear Slope / a1', value=self.system.hw_profile.get('calib_a1', 1.0), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a1': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         ui.number('Quadratic Scalar / a2', value=self.system.hw_profile.get('calib_a2', 0.0), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'calib_a2': e.value})).props('dense outlined').classes('flex-1 text-xs')
-            # RIGHT COLUMN: Advanced MCA settings Panel
+
             with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
                 with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3 h-full'):
                     ui.label('Advanced MCA settings').classes('text-xs font-bold uppercase tracking-wider text-zinc-700 border-b pb-1 w-full')
@@ -49,5 +52,32 @@ class HardwareCalibrationPanel:
             def save_calibration_profile_to_database():
                 self.system.db[self.system.serial_number] = {k: v for k, v in self.system.hw_profile.items()}
                 if self.system.save_hardware_db():
-                    ui.notify("Calibration permanently saved!", type="positive")
+                    ui.notify("Instrument calibration parameters permanently saved!", type="positive")
             ui.button('COMMIT CALIBRATION PARAMETERS', icon='save', on_click=save_calibration_profile_to_database).style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").classes('py-2 px-4 text-xs shadow-md rounded-md')
+        def global_ui_sync_tick():
+            if hasattr(self, 'sidebar') and hasattr(self, 'plot_view'):
+                self.sidebar.refresh_widget_states()
+                self.plot_view.update_ui_elements()
+                
+                # Fetch fresh values from active background service memory slots
+                current_sys_id = backend_service.system.hw_profile.get('SYS-ID', 'SYS-STANDBY')
+                current_serial = backend_service.system.serial_number
+                analyzer_name = backend_service.system.hw_profile.get('Analyzer name', 'UNKNOWN')
+                
+                # 1. Update the reactive global header element badge
+                if current_serial != "UNKNOWN":
+                    self.station_id_badge.set_text(f"Station Node: {current_sys_id}")
+                else:
+                    self.station_id_badge.set_text(f"Station Node: {current_sys_id} (Simulated)")
+                
+                # 2. Force the string input fields inside Tab 3 to refresh their values
+                # This ensures the UI matches the newly loaded profile data
+                if hasattr(self, 'tab_hardware') and hasattr(self, 'main_tabs'):
+                    # Check if the panel object has been built in the current user session
+                    for child in self.main_tabs.parent_container:
+                        if hasattr(child, 'sys_id_input') and child.sys_id_input.value != current_sys_id:
+                            child.sys_id_input.set_value(current_sys_id)
+                        if hasattr(child, 'analyzer_name_input') and child.analyzer_name_input.value != analyzer_name:
+                            child.analyzer_name_input.set_value(analyzer_name)
+            
+        ui.timer(1.0, global_ui_sync_tick)

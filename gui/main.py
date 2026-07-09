@@ -25,15 +25,14 @@ class RIIDSpectroscopyApp:
             with ui.row().classes('w-full justify-between items-center px-2 py-1 border-b').style("border-color: #D1D5DB;"):
                 ui.markdown(f"### **IAEA** RIID Laboratory Spectroscopy Station").classes('text-base font-bold text-slate-800 m-0 p-0')
                 
-                # REVERTED & CLEANED: Simply draw the reactive text handle tracking backend profile memory
-                self.node_id_label = ui.label("Station Node: Syncing S/N...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
+                # REACTIVE SYSTEM ID HOOK: Initialized with a standard sync string tag
+                self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
 
             with ui.card().classes('w-full p-0 rounded-lg border shadow-sm no-wrap overflow-hidden').style("background-color: #2D3748; border-color: #1A202C;"):
                 with ui.tabs().classes('w-full dense text-white') as self.main_tabs:
                     self.tab_id = ui.tab('Spectrum ID', icon='analytics').classes('text-xs font-bold py-2')
                     self.tab_recording = ui.tab('Spectrum Recording', icon='save_alt').classes('text-xs font-bold py-2')
                     self.tab_hardware = ui.tab('Hardware & Calibration', icon='tune').classes('text-xs font-bold py-2')
-
             with ui.tab_panels(self.main_tabs, value=self.tab_id).classes('w-full bg-transparent p-0 flex-1'):
                 with ui.tab_panel(self.tab_id).classes('p-0 m-0 bg-transparent'):
                     with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
@@ -53,9 +52,16 @@ class RIIDSpectroscopyApp:
                 self.sidebar.refresh_widget_states()
                 self.plot_view.update_ui_elements()
                 
-                # RE-EVALUATE HARDWARE PROFILES DIRECTLY DURING TICKS
+                # Fetch the identifier straight from your active profile memory
                 current_sys_id = backend_service.system.hw_profile.get('SYS-ID', 'SYS-STANDBY')
-                self.node_id_label.set_text(f"Station Node: {current_sys_id}")
+                current_serial = backend_service.system.serial_number
+                
+                # Update text node values immediately based on actual discovery states
+                if current_serial != "UNKNOWN":
+                    self.station_id_badge.set_text(f"Station Node: {current_sys_id}")
+                else:
+                    self.station_id_badge.set_text(f"Station Node: {current_sys_id} (Simulated)")
+
             
         ui.timer(1.0, global_ui_sync_tick)
 
