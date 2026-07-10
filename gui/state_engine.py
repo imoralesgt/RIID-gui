@@ -1,11 +1,11 @@
 import os
 import sys
 import json
-from config import HARDWARE_DEFAULTS, logger
+from config import HARDWARE_DEFAULTS, DETECTORS_DB_PATH, SOURCES_DB_PATH, logger
 from core.daq_commands import DaqCommands
 
 class SpectrumAcquisitionSystem:
-    def __init__(self, json_path: str = "detectors.json", sources_path: str = "sources.json"):
+    def __init__(self, json_path: str = DETECTORS_DB_PATH, sources_path: str = SOURCES_DB_PATH):
         self.json_path = json_path
         self.sources_path = sources_path
         self.serial_number = "UNKNOWN"
@@ -35,6 +35,8 @@ class SpectrumAcquisitionSystem:
 
     def save_hardware_db(self) -> bool:
         try:
+            # Dynamically resolve target directory path using constant configuration
+            os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
             with open(self.json_path, "w", encoding="utf-8") as f:
                 json.dump(self.db, f, indent=2)
             return True
@@ -44,6 +46,8 @@ class SpectrumAcquisitionSystem:
 
     def save_sources_db(self) -> bool:
         try:
+            # Dynamically resolve target directory path using constant configuration
+            os.makedirs(os.path.dirname(self.sources_path), exist_ok=True)
             with open(self.sources_path, "w", encoding="utf-8") as f:
                 json.dump(self.sources_db, f, indent=2)
             return True

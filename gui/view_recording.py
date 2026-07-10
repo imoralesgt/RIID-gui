@@ -42,12 +42,13 @@ class SpectrumRecordingPanel:
 
                 def delete_source_handler(msg):
                     row_to_del = msg.args
+                    logger.warning(f"[USER_ACTION] Operator deleted radioactive isotope source reference row match: {row_to_del['Source ID']}")
                     self.system.runtime_metadata['Sources'] = [s for s in self.system.runtime_metadata['Sources'] if s['Source ID'] != row_to_del['Source ID']]
                     self.sources_table.rows = self.system.runtime_metadata['Sources']
                     ui.notify(f"Source registry link purged.", color=BRAND_COLORS['crimson_trace'])
+                
                 self.sources_table.on('delete_source', delete_source_handler)
                 self._build_append_modal()
-
             # RIGHT CARD: Persistent Plotly Canvas and Polling Controllers Readout
             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 50%; border-color: #E2E8F0;'):
                 ui.label('Batch Recording Output & Controls').classes('text-xs font-bold uppercase tracking-wider text-zinc-700')
@@ -61,19 +62,25 @@ class SpectrumRecordingPanel:
                     with ui.row().classes('gap-1'):
                         self.start_btn = ui.button('Start', icon='play_arrow', on_click=self.trigger_batch_start)
                         self.start_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('text-xs')
-                        self.stop_btn = ui.button('Stop', icon='stop', on_click=self.service.stop_execution)
+                        self.stop_btn = ui.button('Stop', icon='stop', on_click=self.trigger_batch_stop)
                         self.stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('text-xs')
 
                 self.progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 mt-1 rounded').props('color=primary')
                 self.status_label = ui.label('Status: Ready').classes('text-xs font-mono text-zinc-500 q-my-none')
                 
                 ui.timer(1.0, self.sync_ui_state)
+
     def trigger_batch_start(self):
+        logger.warning(f"[USER_ACTION] Operator triggered automated spectrum multi-run batch recording. prefix='{self.prefix_input.value}' | runs={self.runs_input.value}")
         self.service.start_batch_recording(
             target_time=int(self.time_input.value or 30),
             total_runs=int(self.runs_input.value or 1),
             prefix=str(self.prefix_input.value or "spectrum")
         )
+
+    def trigger_batch_stop(self):
+        logger.warning("[USER_ACTION] Operator requested STOP multi-run batch recording.")
+        self.service.stop_execution()
 
     def sync_ui_state(self):
         """Pulls ongoing multi-run telemetry fields from server memory instantly upon page visibility re-attachment."""
@@ -114,7 +121,6 @@ class SpectrumRecordingPanel:
         }
         with self.record_plot_container:
             ui.plotly(fig).classes('w-full h-[240px]')
-
     def _build_append_modal(self):
         with ui.dialog() as source_dialog, ui.card().classes('p-4 w-96 space-y-3'):
             ui.label('Link Database Source Profile').classes('text-sm font-bold text-blue-600')
@@ -131,10 +137,12 @@ class SpectrumRecordingPanel:
             
             ui.markdown("--- *Volatile Geometrical Runtime Parameters* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
             dist_input = ui.input('Distance to Detector (cm)', value='20').props('dense outlined').classes('w-full text-xs')
+            
             def commit_source_selection():
                 target_code = code_select.value
                 if new_code_input.value:
                     target_code = str(new_code_input.value).strip()
+                    logger.warning(f"[USER_ACTION] Operator added a new isotope source configuration record into inventory library file: {target_code}")
                     self.system.sources_db[target_code] = {
                         "isotope": new_iso.value, "activity": float(new_act.value or 0.0),
                         "date": new_date.value, "type": new_type.value, "form": new_form.value
@@ -147,10 +155,15 @@ class SpectrumRecordingPanel:
                     return
 
                 metrics = self.system.sources_db[target_code]
+                logger.info(f"[USER_ACTION] Appended radiation source reference '{target_code}' into the transient run parameters.")
                 self.system.runtime_metadata['Sources'].append({
-                    "Source ID": target_code, "Isotope": metrics["isotope"],
-                    "Activity": f"{metrics['activity']:.2f} kBq", "Date": metrics["date"],
-                    "Type": metrics["type"], "Form": metrics["form"], "Distance": f"{dist_input.value or '20'} cm"
+                    "Source ID": target_code, 
+                    "Isotope": metrics["isotope"],
+                    "Activity": f"{metrics['activity']:.2f} kBq", 
+                    "Date": metrics["date"],
+                    "Type": metrics["type"], 
+                    "Form": metrics["form"], 
+                    "Distance": f"{dist_input.value or '20'} cm"
                 })
                 self.sources_table.rows = self.system.runtime_metadata['Sources']
                 source_dialog.close()
