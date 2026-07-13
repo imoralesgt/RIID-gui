@@ -30,6 +30,8 @@ class RIIDSpectroscopyApp:
         self.calibration_panel = None
         self.plot_view = None
         self.sidebar = None
+        self.last_hardware_ok = True
+        self.hardware_ok = False
         
         self.build_workspace()
         self.update_browser_tab_title()
@@ -90,14 +92,16 @@ class RIIDSpectroscopyApp:
 
     def global_ui_sync_tick(self):
         """Drives all real-time component updates and handles dynamic layout changes."""
-        hardware_ok = backend_service.is_hardware_available
+        self.last_hardware_ok = self.hardware_ok
+        self.hardware_ok = backend_service.is_hardware_available
         current_status = backend_service.status_text
         
         current_sys_id = backend_service.system.hw_profile.get('SYS-ID', 'SYS-STANDBY')
         current_serial = backend_service.system.serial_number
         
-        # High-frequency logging trace loop matching statements
-        logger.info(f"[UI_SYNC_LOOP] available={hardware_ok} | serial={current_serial} | msg='{current_status}'")
+        # Logging hardware status updates
+        if self.last_hardware_ok != self.hardware_ok:
+            logger.info(f"[UI_SYNC_LOOP] available={self.hardware_ok} | serial={current_serial} | msg='{current_status}'")
 
         # Update node status badge values (with operator guidance modification)
         if current_serial != "UNKNOWN":
@@ -122,7 +126,7 @@ class RIIDSpectroscopyApp:
             self.plot_view.update_ui_elements()
 
         # Handle responsive layout mutations on hot-plug operations
-        if hardware_ok:
+        if self.hardware_ok:
             self.connection_alert_banner.classes(add='bg-green-50 border-green-200 text-green-800', remove='bg-red-50 border-red-200 text-red-800')
             self.banner_icon.set_visibility(False)
             self.banner_text.set_text(f"Hardware connection online: {current_status}")
