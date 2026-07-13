@@ -96,7 +96,7 @@ class MLPreprocessing:
         spectrum_data_log = np.log10(spectrum_data + 1)
 
         # Smoothinig with Savitzky-Golay filter. Clipping to 0 to avoid negatives
-        spectrum_data_filtered = savgol_filter(spectrum_data_log, window_length=self.sg_window_length, polyorder=self.sg_polyorder)
+        spectrum_data_filtered = savgol_filter(spectrum_data_log, window_length=self.__sg_window_length, polyorder=self.__sg_polyorder)
         spectrum_data_filtered = np.clip(spectrum_data_filtered, 0, None)
 
         # Decimation
