@@ -1,14 +1,9 @@
 import ai_edge_litert.interpreter as tflite
 import numpy as np
 import os
-import time
-import argparse
-import sys
 from ml_preprocessing import MLPreprocessing 
-from sklearn.preprocessing import LabelEncoder
 from config import logger
 
-le = LabelEncoder()
 ISOTOPE_LABELS_DEEP = {
     'bkg'   : 'Background',
     'co'    : 'Co-60',
@@ -33,9 +28,14 @@ MODEL_LABELS = {
     'cnn_multilabel': ISOTOPE_LABELS_MULTILABEL
 }
 
-# le.fit(list(ISOTOPE_LABELS.keys()))
-
 class MlInference:
+    """
+    Contains the logic for radioisotope identification (RIID) for a raw experimental spectrum, given the environmental background
+    and the collection time of both the experimental spectrum and the background.
+
+    The ML model for the RIID is loaded from the `ml_models` directory.    
+    """
+
     __ML_MODELS_PATH = os.path.join(os.path.dirname(__file__), 'ml_models')
     __ML_MODEL_EXTENSION = '.tflite'
 
@@ -60,7 +60,18 @@ class MlInference:
     
     def __ml_inference(self,
                        preprocessed_spectrum : np.ndarray,
-                       ml_model : tflite.Interpreter):
+                       ml_model : tflite.Interpreter) -> list[float]:
+        """
+        Executes the ML inference based on the provided spectrum (pre-processed) and the
+        loaded ML model.
+
+        Args:
+            preprocessed_spectrum (np.ndarray): Pre-processed spectrum data.
+            ml_model (tflite.Interpreter): Loaded ML model.
+
+        Returns:
+            list[float]: ML output probabilities for each class
+        """
 
         # Load the ML model
         ml_model.allocate_tensors()
@@ -84,6 +95,15 @@ class MlInference:
 
     def __lookup_ml_model(self,
                             ml_model : str) -> tflite.Interpreter:
+        """
+        Looks up the ML model based on the provided model name.
+
+        Args:
+            ml_model (str): ML model name.
+
+        Returns:
+            tflite.Interpreter: Loaded ML model.
+        """
         
         ml_model = ml_model.lower()
         ml_model = f"{ml_model}{self.__ML_MODEL_EXTENSION}"
@@ -98,13 +118,39 @@ class MlInference:
             logger.error(f"Failed to load ML model: {e}")
             return None
         
-    def __interpret_probabilities(self, probabilities : list[float], labels : list[str], threshold : float = 0.5):
+    def __interpret_probabilities(self, probabilities : list[float], labels : list[str], threshold : float = 0.5) -> dict:
+        """Shows in a readable way the probabilities of each class outcome from the ML model inference.
+
+        Args:
+            probabilities (list[float]): ML output probabilities for each class.
+            labels (list[str]): List of class labels.
+            threshold (float, optional): Classification threshold. Defaults to 0.5.
+
+        Returns:
+            dict: Dictionary with the class label as key and the probability as value
+        """
         return {labels[i] : p for i, p in enumerate(probabilities) if p > threshold}
 
     def inference_pipeline(self,
                 spectrum_data : list[int],
                 spectrum_live_time : float,
-                ml_model : str):
+                ml_model : str) -> dict:
+        """
+        Executes the ML inference pipeline for a given spectrum. 
+            1. Subtracts the passed spectrum data from the background, normalizing background to the spectrum live-time.
+            2. Determines the significance of the spectrum by comparing with the threshold (limit of detection)
+                2.1. If there are not enough counts, ML inference is not performed
+                2.2. If there are enough counts, ML inference is performed
+            3. Returns the ML inference result in a friendly way: dictionary of classes with associated probability of occurrence
+
+        Args:
+            spectrum_data (list[int]): List of spectrum counts.
+            spectrum_live_time (float): Live-time of the spectrum in seconds.
+            ml_model (str): ML model name.
+
+        Returns:
+            dict: ML inference result. Each detected isotope (probability > 50%) is returned along with the probability of occurrence.
+        """
         
         ml_preprocess = MLPreprocessing()
         detection_threshold = ml_preprocess.get_min_counts()
