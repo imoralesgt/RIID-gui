@@ -4,6 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
+    "gui",
     "ml-core",
     "python-api",
     "riid-gui-workspace",
@@ -501,6 +502,27 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/89/76/c615883b7b521ead2944bb3480398cbb07e12b7b4e4d073d3752eb721558/frozenlist-1.8.0-cp314-cp314t-win_amd64.whl", hash = "sha256:06be8f67f39c8b1dc671f5d83aaefd3358ae5cdcf8314552c57e7ed3e6475bdd", size = 49451, upload-time = "2025-10-06T05:37:53.425Z" },
     { url = "https://files.pythonhosted.org/packages/e0/a3/5982da14e113d07b325230f95060e2169f5311b1017ea8af2a29b374c289/frozenlist-1.8.0-cp314-cp314t-win_arm64.whl", hash = "sha256:102e6314ca4da683dca92e3b1355490fed5f313b768500084fbe6371fddfdb79", size = 42507, upload-time = "2025-10-06T05:37:54.513Z" },
     { url = "https://files.pythonhosted.org/packages/9a/9a/e35b4a917281c0b8419d4207f4334c8e8c5dbf4f3f5f9ada73958d937dcc/frozenlist-1.8.0-py3-none-any.whl", hash = "sha256:0c18a16eab41e82c295618a77502e17b195883241c563b00f0aa5106fc4eaa0d", size = 13409, upload-time = "2025-10-06T05:38:16.721Z" },
+]
+
+[[package]]
+name = "gui"
+version = "0.1.0"
+source = { editable = "gui" }
+dependencies = [
+    { name = "ai-edge-litert" },
+    { name = "nicegui" },
+    { name = "numpy" },
+    { name = "python-api" },
+    { name = "scikit-learn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ai-edge-litert", specifier = ">=2.1.6" },
+    { name = "nicegui", specifier = ">=3.14.0" },
+    { name = "numpy", specifier = ">=2.5.0" },
+    { name = "python-api", editable = "daq-core/NSIL-MCA-DPP4SiPM/sw/python-api" },
+    { name = "scikit-learn", specifier = ">=1.9.0" },
 ]
 
 [[package]]
@@ -1068,7 +1090,7 @@ wheels = [
 
 [[package]]
 name = "nicegui"
-version = "3.13.0"
+version = "3.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1098,9 +1120,9 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/90/a2/61a865fe4fb25b9fc15510f15d110406a12498fcba309518ac86ae6878d6/nicegui-3.13.0.tar.gz", hash = "sha256:340ea81a9e5e9a94365492ccde249c55e3619d05b73b60dff9424b79a264a8f6", size = 19612421, upload-time = "2026-06-09T12:35:10.433Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/8a/e477a9d7693b19b6941903b26c3e1525634f077102b3c82599466ca6a643/nicegui-3.14.0.tar.gz", hash = "sha256:d581537545aad191757b668f95612f7362ca50fcfe30e82bd9ca424337c7006e", size = 19621934, upload-time = "2026-06-30T14:40:37.937Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/9c/ba25bdc2043854173365ffd29f34649eb59b705030e6c8bb154db30b472c/nicegui-3.13.0-py3-none-any.whl", hash = "sha256:06facff080828ff3da2855a33dcfca08ceb922138ac2c79d6ed021a9e949fab8", size = 20196229, upload-time = "2026-06-09T12:35:06.272Z" },
+    { url = "https://files.pythonhosted.org/packages/55/65/2675ae3b9e69d51afbb103a053ce656d555b188b4509add5386b4ad4e5de/nicegui-3.14.0-py3-none-any.whl", hash = "sha256:05b1e453350930b253268edee093bf79cd7b9fe2ffab96043f9234722736652d", size = 20204536, upload-time = "2026-06-30T14:40:33.606Z" },
 ]
 
 [[package]]
