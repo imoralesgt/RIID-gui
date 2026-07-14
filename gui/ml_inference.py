@@ -4,7 +4,7 @@ import os
 from ml_preprocessing import MLPreprocessing 
 from config import logger
 
-ISOTOPE_LABELS_DEEP = {
+__ISOTOPE_LABELS_DEEP = {
     'bkg'   : 'Background',
     'co'    : 'Co-60',
     'coeu'  : 'Co-60_Eu-152',
@@ -15,7 +15,7 @@ ISOTOPE_LABELS_DEEP = {
     'u'     : 'U-nat',
 }
 
-ISOTOPE_LABELS_MULTILABEL = {
+__ISOTOPE_LABELS_MULTILABEL = {
     'bkg'   : 'Background',
     'co'    : 'Co-60',
     'cs'    : 'Cs-137',
@@ -24,8 +24,8 @@ ISOTOPE_LABELS_MULTILABEL = {
 }
 
 MODEL_LABELS = {
-    'cnn_deep'      : ISOTOPE_LABELS_DEEP,
-    'cnn_multilabel': ISOTOPE_LABELS_MULTILABEL
+    'cnn_deep'      : __ISOTOPE_LABELS_DEEP,
+    'cnn_multilabel': __ISOTOPE_LABELS_MULTILABEL
 }
 
 class MlInference:
@@ -45,6 +45,12 @@ class MlInference:
     ]
 
     def __init__(self, isotope_labels : dict, bkgnd_data : list[int], bkgnd_live_time : float):
+        """
+        Args:
+            isotope_labels (dict): Dictionary of isotope labels.
+            bkgnd_data (list[int]): List of background counts.
+            bkgnd_live_time (float): Live-time of the background in seconds.
+        """
         self.__isotope_labels = isotope_labels
         self.__bkgnd_data = bkgnd_data
         self.__bkgnd_live_time = bkgnd_live_time
@@ -57,6 +63,10 @@ class MlInference:
     
     def get_bkgnd_live_time(self):
         return self.__bkgnd_live_time
+
+    def update_bkgnd_data(self, new_bkgnd_data : list[int], new_bkgnd_live_time : float):
+        self.__bkgnd_data = new_bkgnd_data
+        self.__bkgnd_live_time = new_bkgnd_live_time
     
     def __ml_inference(self,
                        preprocessed_spectrum : np.ndarray,
