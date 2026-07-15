@@ -52,10 +52,14 @@ class MlInference:
         'cnn_deep',
     ]
 
-    def __init__(self, ml_model_name : str, bkgnd_data : list[int]  = [], bkgnd_live_time : float = 0.0):
+    # Strings for the ML inference results
+    STR_NOT_ENOUGH_COUNTS = 'Not enough counts to perform RIID'
+
+    def __init__(self, ml_model_name : str, min_counts : int = 25, bkgnd_data : list[int]  = [], bkgnd_live_time : float = 0.0):
         """
         Args:
             ml_model_name (str): Name of the ML model used for inference. Models are stored in the `ml_models` directory.
+            min_counts (int): Minimum peak counts (after background subtraction) to perform the ML inference (counts threshold).
             bkgnd_data (list[int]): List of background counts.
             bkgnd_live_time (float): Live-time of the background in seconds.
         """
@@ -69,6 +73,10 @@ class MlInference:
         # Associate the ML model name with the corresponding labels
         self.__isotope_labels = self.MODEL_LABELS[ml_model_name]
         logger.info(f'Isotope labels associated to ML model: {self.__isotope_labels}')
+
+        # Set the minimum counts to trigger the ML inference execution
+        self.__min_counts = min_counts
+        logger.info(f"Minimum expected counts on a single channel to trigger ML inference: {min_counts}")
 
         # Initialize the background (if any)
         logger.info('Initializing background data...')
@@ -118,6 +126,14 @@ class MlInference:
         self.__bkgnd_data = new_bkgnd_data
         self.__bkgnd_live_time = new_bkgnd_live_time
         logger.info('Background data updated.')
+
+    def update_min_counts(self, new_min_counts : int):
+        """
+        Updates the minimum count required in a single channel (after background subtraction)
+        to trigger the ML inference.
+        """
+        
+        self.__min_counts = new_min_counts
     
     def __ml_inference(self, preprocessed_spectrum : np.ndarray) -> list[float]:
         """
@@ -212,7 +228,7 @@ class MlInference:
             dict: ML inference result. Each detected isotope (probability > 50%) is returned along with the probability of occurrence.
         """
         
-        ml_preprocess = MLPreprocessing()
+        ml_preprocess = MLPreprocessing(min_counts = self.__min_counts)
         detection_threshold = ml_preprocess.get_min_counts()
 
         spectrum_no_bg = ml_preprocess.subtract_background(spectrum_data = spectrum_data,
@@ -227,8 +243,8 @@ class MlInference:
         if spectrum_peak_cnt < detection_threshold:
             logger.warning(f"Spectrum counts peak is {spectrum_peak_cnt}, less than the detection treshold ({detection_threshold}). ML inference will not be performed. Returning Background as result.")
             
-            ## Returns the first element of the isotope list: background
-            return list(self.__isotope_labels.values())[0]
+            ## Returns a message indicating that there are not enough counts accumulated yet
+            return self.STR_NOT_ENOUGH_COUNTS
         
         # Execute the rest of the preprocessing pipeline: log10 scaling, smoothing, decimation, and area normalization.
         spectrum_log10 = ml_preprocess.preprocess_log10(
