@@ -5,6 +5,7 @@ from datetime import datetime
 from config import logger, DATA_DIR
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
+from ml_inference import MlInference
 
 class RIIDCoreService:
     # Centralized folder destination constant
@@ -13,7 +14,7 @@ class RIIDCoreService:
     # Programmatic class constant for the unsigned 32-bit hardware register gating limit (2^32 - 1)
     MAX_32BIT_UINT = int(2**32 - 1)
 
-    def __init__(self):
+    def __init__(self, ml_model_name : str):
         logger.info("[SERVICE_INIT] Initializing spectroscopy operations hub...")
         self.system = SpectrumAcquisitionSystem()
         self.system.sync_hardware_profile()
@@ -58,6 +59,9 @@ class RIIDCoreService:
         # Asynchronous Task Tracking Handles
         self._main_loop_task = None
         self._heartbeat_task = None
+
+        # ML inference model
+        self.ml_inference = MlInference(ml_model_name = ml_model_name, min_counts = 20)
 
     def reinitialize_daq_handle(self, explicit_preset_ms: int = 0):
         """Safely destroys any stale tracking references and instantiates a clean driver mapping the JSON profile."""
@@ -173,7 +177,7 @@ class RIIDCoreService:
 
     async def _bg_recording_sequence(self):
         """Asynchronous worker for collecting background spectrum matrix arrays with accurate hardware live-time capture."""
-        logger.info("[BACKGROUND_RUN] Async recording pipeline workers mounting...")
+        logger.info("[BACKGROUND_RUN] Async recording pipeline worker mounting...")
         try:
             self.reinitialize_daq_handle(explicit_preset_ms=self.bg_target_time * 1000)
             self.daq_device.open()
@@ -208,6 +212,10 @@ class RIIDCoreService:
                 self.status_text = "Background Profile Ready"
                 self.current_isotope_id = "BG Complete. Ready for Survey."
                 self.state = 'IDLE'
+
+                # Update ML model background
+                self.ml_inference.update_bkgnd_data(new_bkgnd_data=self.background_spectrum, new_bkgnd_live_time=self.bg_accumulated_seconds)
+
                 logger.info(f"[BACKGROUND_RUN] Background profile saved. Pure HW Live-Time: {self.bg_hardware_live_time_ms} ms")
         except Exception as e:
             logger.error(f"[BACKGROUND_RUN] Pipeline error: {e}", exc_info=True)
@@ -281,7 +289,7 @@ class RIIDCoreService:
                     continue
                 
                 if total_counts >= self.min_counts_trigger:
-                    self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum)
+                    self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
                 else:
                     self.current_isotope_id = f"Accumulating ({total_counts}/{self.min_counts_trigger} cts)"
                     
@@ -296,9 +304,10 @@ class RIIDCoreService:
             logger.info("[SURVEY_RUN] Shared master loop context released safely.")
 
 
-    def _execute_ml_pipeline(self, raw_spectrum: list) -> str:
-        """Mock placeholder representing automated isotope identification algorithm model."""
-        return "ML Outcome: Co-60 Identified"
+    def _execute_ml_pipeline(self, raw_spectrum: list[int], live_time : int) -> str:
+        """Executes ML pipeline on live spectrum data."""
+        return self.ml_inference.inference_pipeline(spectrum_data=raw_spectrum, spectrum_live_time=live_time)
+
 
     def start_batch_recording(self, target_time: int, total_runs: int, prefix: str):
         """Assembles automated structural script loops mapping data files."""

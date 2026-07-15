@@ -5,8 +5,11 @@ from view_spectrum_id import SpectrumPlotContainer, ControlPanelSidebar
 from view_recording import SpectrumRecordingPanel
 from view_calibration import HardwareCalibrationPanel
 
+# Name of the ML model used for RIID. Available options in folder `ml_models/`
+ML_MODEL_NAME = 'cnn_multilabel'
+
 # Instantiate global backend execution singletons
-backend_service = RIIDCoreService()
+backend_service = RIIDCoreService(ml_model_name = ML_MODEL_NAME)
 
 async def runtime_bootstrap_sequence():
     logger.info("[BOOT] Triggering system bootstrap sequence initialization...")

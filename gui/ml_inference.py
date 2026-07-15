@@ -4,30 +4,6 @@ import os
 from ml_preprocessing import MLPreprocessing 
 from config import logger
 
-ISOTOPE_LABELS_DEEP = {
-    'bkg'   : 'Background',
-    'co'    : 'Co-60',
-    'coeu'  : 'Co-60_Eu-152',
-    'cs'    : 'Cs-137',
-    'csco'  : 'Cs-137_Co-60',
-    'cseu'  : 'Cs-137_Eu-152',
-    'eu'    : 'Eu-152',
-    'u'     : 'U-nat',
-}
-
-ISOTOPE_LABELS_MULTILABEL = {
-    'bkg'   : 'Background',
-    'co'    : 'Co-60',
-    'cs'    : 'Cs-137',
-    'eu'    : 'Eu-152',
-    'u'     : 'U-nat',
-}
-
-MODEL_LABELS = {
-    'cnn_deep'      : ISOTOPE_LABELS_DEEP,
-    'cnn_multilabel': ISOTOPE_LABELS_MULTILABEL
-}
-
 class MlInference:
     """
     Contains the logic for radioisotope identification (RIID) for a raw experimental spectrum, given the environmental background
@@ -36,44 +12,145 @@ class MlInference:
     The ML model for the RIID is loaded from the `ml_models` directory.    
     """
 
+    ## Update these labels to reflect the possible outcomes of the ML model
+    ## Use always "background" as the first item
+
+    # Labels for the CNN Deep model
+    __ISOTOPE_LABELS_DEEP = {
+        'bkg'   : 'Background',
+        'co'    : 'Co-60',
+        'coeu'  : 'Co-60_Eu-152',
+        'cs'    : 'Cs-137',
+        'csco'  : 'Cs-137_Co-60',
+        'cseu'  : 'Cs-137_Eu-152',
+        'eu'    : 'Eu-152',
+        'u'     : 'U-nat',
+    }
+
+    # Labels for the CNN Deep Multilabel model
+    __ISOTOPE_LABELS_MULTILABEL = {
+        'bkg'   : 'Background',
+        'co'    : 'Co-60',
+        'cs'    : 'Cs-137',
+        'eu'    : 'Eu-152',
+        'u'     : 'U-nat',
+    }
+
+    # Update this dictionary to match the name of the ML models with the corresponding labels
+    MODEL_LABELS = {
+        'cnn_deep'      : __ISOTOPE_LABELS_DEEP,
+        'cnn_multilabel': __ISOTOPE_LABELS_MULTILABEL
+    }
+
+    # Path where the compiled ML models are stored
     __ML_MODELS_PATH = os.path.join(os.path.dirname(__file__), 'ml_models')
     __ML_MODEL_EXTENSION = '.tflite'
 
-    ML_MODELS = [
-        'cnn_deep',
+    # Names of the valid ML models
+    VALID_ML_MODELS = [
         'cnn_multilabel'
+        'cnn_deep',
     ]
 
-    def __init__(self, isotope_labels : dict, bkgnd_data : list[int], bkgnd_live_time : float):
-        self.__isotope_labels = isotope_labels
+    # Strings for the ML inference results
+    STR_NOT_ENOUGH_COUNTS = 'Not enough counts to perform RIID'
+
+    def __init__(self, ml_model_name : str, min_counts : int = 25, bkgnd_data : list[int]  = [], bkgnd_live_time : float = 0.0):
+        """
+        Args:
+            ml_model_name (str): Name of the ML model used for inference. Models are stored in the `ml_models` directory.
+            min_counts (int): Minimum peak counts (after background subtraction) to perform the ML inference (counts threshold).
+            bkgnd_data (list[int]): List of background counts.
+            bkgnd_live_time (float): Live-time of the background in seconds.
+        """
+
+        # Lookup the ML model
+        self.__ml_model = self.__lookup_ml_model(ml_model_name)
+        if self.__ml_model is None:
+            logger.error(f'Failed to load ML model: {ml_model_name}. Falling back to default model: {self.VALID_ML_MODELS[0]}')
+            self.__ml_model = self.__lookup_ml_model(self.VALID_ML_MODELS[0])
+
+        # Associate the ML model name with the corresponding labels
+        self.__isotope_labels = self.MODEL_LABELS[ml_model_name]
+        logger.info(f'Isotope labels associated to ML model: {self.__isotope_labels}')
+
+        # Set the minimum counts to trigger the ML inference execution
+        self.__min_counts = min_counts
+        logger.info(f"Minimum expected counts on a single channel to trigger ML inference: {min_counts}")
+
+        # Initialize the background (if any)
+        logger.info('Initializing background data...')
+        if len(bkgnd_data) < 256:
+            logger.warning(f'Background not defined yet. Do not forget to update it before inference.')
+        else:
+            logger.info(f'Background data initialized. Live-time: {bkgnd_live_time}')
         self.__bkgnd_data = bkgnd_data
         self.__bkgnd_live_time = bkgnd_live_time
+        logger.info('ML inference module initialized.')
 
-    def get_isotope_labels(self):
+    def get_isotope_labels(self) -> dict:
+        """
+        Returns the dictionary of isotope labels corresponding to the selected ML model
+        
+        Returns:
+            dict: Dictionary of isotope labels
+        """
         return self.__isotope_labels
     
-    def get_bkgnd_data(self):
+    def get_bkgnd_data(self) -> list[int]:
+        """
+        Returns the background spectrum as a list of counts
+
+        Returns:
+            list[int]: List of background counts
+        """
         return self.__bkgnd_data
     
-    def get_bkgnd_live_time(self):
+    def get_bkgnd_live_time(self) -> float:
+        """
+        Returns the live-time of the background in seconds
+        
+        Returns:
+            float: Live-time of the background in seconds
+        """
         return self.__bkgnd_live_time
+
+    def update_bkgnd_data(self, new_bkgnd_data : list[int], new_bkgnd_live_time : float):
+        """
+        Updates the background data and its live-time.
+
+        Args:
+            new_bkgnd_data (list[int]): List of background counts.
+            new_bkgnd_live_time (float): Live-time of the background in seconds.
+        """
+        self.__bkgnd_data = new_bkgnd_data
+        self.__bkgnd_live_time = new_bkgnd_live_time
+        logger.info('Background data updated.')
+
+    def update_min_counts(self, new_min_counts : int):
+        """
+        Updates the minimum count required in a single channel (after background subtraction)
+        to trigger the ML inference.
+        """
+        
+        self.__min_counts = new_min_counts
     
-    def __ml_inference(self,
-                       preprocessed_spectrum : np.ndarray,
-                       ml_model : tflite.Interpreter) -> list[float]:
+    def __ml_inference(self, preprocessed_spectrum : np.ndarray) -> list[float]:
         """
         Executes the ML inference based on the provided spectrum (pre-processed) and the
-        loaded ML model.
+        loaded ML model in the constructor of the class.
 
         Args:
             preprocessed_spectrum (np.ndarray): Pre-processed spectrum data.
-            ml_model (tflite.Interpreter): Loaded ML model.
 
         Returns:
             list[float]: ML output probabilities for each class
         """
 
-        # Load the ML model
+        # Loads the model configured in the class constructor
+        ml_model = self.__ml_model
+
+        # Initialize the ML model
         ml_model.allocate_tensors()
         ml_inputs = ml_model.get_input_details()[0]
         ml_outputs = ml_model.get_output_details()[0]
@@ -113,9 +190,10 @@ class MlInference:
 
         # Return the model
         try:
+            logger.info(f"Loading ML model: {ml_model_path}")
             return tflite.Interpreter(model_path=ml_model_path)
         except Exception as e:
-            logger.error(f"Failed to load ML model: {e}")
+            logger.error(f"Failed to load ML model: {e}. ML models are stored in {self.__ML_MODELS_PATH}.")
             return None
         
     def __interpret_probabilities(self, probabilities : list[float], labels : list[str], threshold : float = 0.5) -> dict:
@@ -129,12 +207,11 @@ class MlInference:
         Returns:
             dict: Dictionary with the class label as key and the probability as value
         """
-        return {labels[i] : p for i, p in enumerate(probabilities) if p > threshold}
+        return {labels[i] : float(p) for i, p in enumerate(probabilities) if p > threshold}
 
     def inference_pipeline(self,
                 spectrum_data : list[int],
-                spectrum_live_time : float,
-                ml_model : str) -> dict:
+                spectrum_live_time : float,) -> dict:
         """
         Executes the ML inference pipeline for a given spectrum. 
             1. Subtracts the passed spectrum data from the background, normalizing background to the spectrum live-time.
@@ -146,13 +223,12 @@ class MlInference:
         Args:
             spectrum_data (list[int]): List of spectrum counts.
             spectrum_live_time (float): Live-time of the spectrum in seconds.
-            ml_model (str): ML model name.
 
         Returns:
             dict: ML inference result. Each detected isotope (probability > 50%) is returned along with the probability of occurrence.
         """
         
-        ml_preprocess = MLPreprocessing()
+        ml_preprocess = MLPreprocessing(min_counts = self.__min_counts)
         detection_threshold = ml_preprocess.get_min_counts()
 
         spectrum_no_bg = ml_preprocess.subtract_background(spectrum_data = spectrum_data,
@@ -167,20 +243,17 @@ class MlInference:
         if spectrum_peak_cnt < detection_threshold:
             logger.warning(f"Spectrum counts peak is {spectrum_peak_cnt}, less than the detection treshold ({detection_threshold}). ML inference will not be performed. Returning Background as result.")
             
-            ## Returns the first element of the isotope list: background
-            return list(self.__isotope_labels.values())[0]
+            ## Returns a message indicating that there are not enough counts accumulated yet
+            return self.STR_NOT_ENOUGH_COUNTS
         
         # Execute the rest of the preprocessing pipeline: log10 scaling, smoothing, decimation, and area normalization.
         spectrum_log10 = ml_preprocess.preprocess_log10(
             spectrum_data = spectrum_no_bg
         )
-
-        # Lookup for the ML model based on the passed model name
-        ml_model = self.__lookup_ml_model(ml_model)
         
         # Execute the ML inference, return the label of the predicted isotope
-        probabilities = self.__ml_inference(preprocessed_spectrum = spectrum_log10,
-                                    ml_model = ml_model)
+        probabilities = self.__ml_inference(preprocessed_spectrum = spectrum_log10)
+        logger.debug(f"ML inference probabilities: {probabilities}")
 
         return self.__interpret_probabilities(probabilities = probabilities,
                                             labels = list(self.__isotope_labels.values()))
@@ -196,12 +269,13 @@ if __name__ == '__main__':
 
     ML_MODEL = 'cnn_multilabel'
 
-    ml_inference = MlInference(isotope_labels=MODEL_LABELS[ML_MODEL],
-                            bkgnd_data=BKGND,
-                            bkgnd_live_time=BKGND_LIVETIME)
+    # Initialize the ML inference class instance
+    ml_inference = MlInference(ml_model_name = ML_MODEL)
     
-    ml_result = ml_inference.inference_pipeline(spectrum_data=SPECTRUM,
-                                spectrum_live_time=SPECTRUM_LIVETIME,
-                                ml_model=ML_MODEL)
+    # Update the background data and its live-time
+    ml_inference.update_bkgnd_data(new_bkgnd_data = BKGND, new_bkgnd_live_time = BKGND_LIVETIME)
+    
+    # Perform ML inference with the provided spectrum
+    ml_result = ml_inference.inference_pipeline(spectrum_data=SPECTRUM, spectrum_live_time=SPECTRUM_LIVETIME)
     
     logger.info(f"ML inference probabilities: {ml_result}")
