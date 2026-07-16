@@ -236,7 +236,7 @@ class ControlPanelSidebar:
         self.service = service
         self.plot_container = plot_container
         if not hasattr(self.service, 'use_log_scale'):
-            self.service.use_log_scale = True
+            self.service.use_log_scale = False
         self._assemble_ui()
 
     def _assemble_ui(self):
@@ -249,7 +249,7 @@ class ControlPanelSidebar:
                 self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
                 
                 self.scale_checkbox = ui.checkbox(
-                    'Enable Logarithmic Counts (Y-Axis)', 
+                    'Log-scale', 
                     value=self.service.use_log_scale,
                     on_change=lambda e: self._toggle_plot_scale(e.value)
                 ).classes('text-xs text-zinc-300 font-medium mt-1')
@@ -267,6 +267,8 @@ class ControlPanelSidebar:
             with ui.row().classes('w-full gap-2 no-wrap pt-1'):
                 self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
                 self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
+                self.clear_btn = ui.button('CLEAR', icon='delete_sweep', on_click=self.trigger_clear)
+                self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
 
     def _toggle_plot_scale(self, value: bool):
         logger.info(f"[USER_ACTION] Operator modified counts scaling preference selection -> use_log_scale={value}")
@@ -294,6 +296,10 @@ class ControlPanelSidebar:
     def trigger_stop(self):
         logger.warning("[USER_ACTION] Operator clicked STOP survey button.")
         self.service.stop_execution()
+
+    def trigger_clear(self):
+        logger.warning("[USER_ACTION] Operator clicked CLEAR button - wiping accumulated survey spectrum (background preserved).")
+        self.service.clear_survey_data()
 
     def refresh_widget_states(self):
         """Monitors status variables and dynamically updates the panel metrics text strings."""
@@ -351,3 +357,9 @@ class ControlPanelSidebar:
             self.play_stop_btn.style("background-color: #EF4444; font-weight: bold;")
 
         self.play_stop_btn.set_visibility((is_idle and hw_ok and has_bg) or not is_idle)
+
+        # CLEAR only touches the accumulated survey spectrum. It stays available
+        # both when idle and during an active survey so it doesn't require STOP
+        # first; it's hidden only during BG recording / batch runs where clearing
+        # would be ambiguous or unsafe.
+        self.clear_btn.set_visibility(is_idle or is_survey_running)

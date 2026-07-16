@@ -3,9 +3,12 @@ from nicegui import ui
 from config import BRAND_COLORS, logger
 
 class HardwareCalibrationPanel:
-    def __init__(self, system, title_sync_callback=None):
+    def __init__(self, system, title_sync_callback=None, push_profile_callback=None):
         self.system = system
         self.title_sync_callback = title_sync_callback
+        # Called on COMMIT to actually transmit the DPP parameters to the board -
+        # this is one of the only two conditions under which that transmission happens.
+        self.push_profile_callback = push_profile_callback
         self.last_bound_serial = "UNKNOWN"
         self.render_layout()
 
@@ -58,8 +61,14 @@ class HardwareCalibrationPanel:
                 if self.system.save_hardware_db():
                     ui.notify("Instrument calibration parameters permanently saved!", type="positive")
 
-                    # Condition 2: Force configuration transmission down to board
-                    backend_service.hardware_sync_required = True
+                    # Condition: COMMIT is one of only two triggers that push DPP
+                    # parameters down to the physical board (the other being initial
+                    # hardware probe on app/service launch).
+                    if self.push_profile_callback:
+                        if self.push_profile_callback():
+                            ui.notify("DPP parameters programmed to hardware.", type="positive")
+                        else:
+                            ui.notify("Saved, but hardware programming was skipped (offline or busy).", type="warning")
 
                     if self.title_sync_callback:
                         self.title_sync_callback()

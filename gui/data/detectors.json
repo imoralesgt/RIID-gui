@@ -17,7 +17,8 @@
     "Detector size": "3.8 cm diameter x 3.8 cm thick",
     "Detector type number": "38B38/SIP-E3-X2",
     "Detector serial number": "S1AB2059",
-    "Analyzer name": "NSIL-DPP4SiPM-SYS01"
+    "Analyzer name": "NSIL-DPP4SiPM-SYS01",
+    "port_name": "/dev/ttyUSB1"
   },
   "210328BE40F5B": {
     "SYS-ID": "SYS02",
