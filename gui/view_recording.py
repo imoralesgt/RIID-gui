@@ -7,9 +7,23 @@ from state_engine import SpectrumAcquisitionSystem
 from config import BRAND_COLORS, logger
 
 class SpectrumRecordingPanel:
+    # Fixed on purpose: kept constant across data updates so Plotly preserves the
+    # user's manual zoom/pan instead of resetting it every time the batch spectrum
+    # refreshes. Autozoom then only happens via the user's own action (double-click
+    # or the toolbar's Autoscale/Reset-axes button).
+    PLOT_UIREVISION = 'batch_recording_plot'
+
     def __init__(self, service):
         self.service = service
         self.system = service.system
+        # Tracks the last batch spectrum fingerprint actually rendered, so the
+        # heavy record_plot_container.clear()+ui.plotly() redraw can be skipped
+        # while no batch recording is active and nothing changed (issue #43).
+        self._last_batch_render_signature = None
+        # The live ui.plotly widget, kept alive and updated in place across data
+        # refreshes (rather than torn down and recreated) so the browser-side plot
+        # instance - and the user's zoom/pan state - persists.
+        self._plot_widget = None
         self.render_layout()
 
     def render_layout(self):
@@ -93,12 +107,23 @@ class SpectrumRecordingPanel:
             self.progress_bar.set_value(min(self.service.batch_elapsed_seconds / self.service.batch_target_time, 1.0))
         else:
             self.progress_bar.set_value(0.0)
-            
-        self.refresh_recording_canvas(self.service.batch_spectrum)
+        
+        spectrum = self.service.batch_spectrum
+        render_signature = (len(spectrum) if spectrum else 0, sum(spectrum) if spectrum else 0)
+        
+        # While no batch run is active, only redraw the canvas if the spectrum
+        # actually differs from what's already shown - otherwise this rebuilds an
+        # identical Plotly figure every second, causing a visible "blink".
+        if not is_batch and render_signature == self._last_batch_render_signature:
+            return
+        self._last_batch_render_signature = render_signature
+        
+        self.refresh_recording_canvas(spectrum)
 
     def refresh_recording_canvas(self, spectrum_data: list):
-        self.record_plot_container.clear()
         if not spectrum_data:
+            self.record_plot_container.clear()
+            self._plot_widget = None
             with self.record_plot_container, ui.column().classes('w-full h-[240px] items-center justify-center text-zinc-400 gap-1'):
                 ui.icon('radioactivity', size='md').style(f"color: {BRAND_COLORS['accent']};")
                 ui.label("Batch Analyzer Idle - Configure Fields and Press Start").classes('text-[11px] font-bold text-zinc-600')
@@ -116,11 +141,19 @@ class SpectrumRecordingPanel:
             'layout': {
                 'xaxis': {'title': 'Energy (keV)', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6', 'autorange': True},
                 'yaxis': {'title': 'Counts', 'type': 'log', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6'},
-                'margin': {'l': 40, 'r': 15, 't': 10, 'b': 30}, 'plot_bgcolor': '#FFFFFF', 'paper_bgcolor': '#FFFFFF', 'showlegend': False
+                'margin': {'l': 40, 'r': 15, 't': 10, 'b': 30}, 'plot_bgcolor': '#FFFFFF', 'paper_bgcolor': '#FFFFFF', 'showlegend': False,
+                'uirevision': self.PLOT_UIREVISION,
             }
         }
-        with self.record_plot_container:
-            ui.plotly(fig).classes('w-full h-[240px]')
+        if self._plot_widget is None:
+            self.record_plot_container.clear()
+            with self.record_plot_container:
+                self._plot_widget = ui.plotly(fig).classes('w-full h-[240px]')
+        else:
+            # Push new data into the existing widget instead of recreating it, so
+            # the user's manual zoom/pan on this plot survives the data refresh.
+            self._plot_widget.figure = fig
+            self._plot_widget.update()
     def _build_append_modal(self):
         with ui.dialog() as source_dialog, ui.card().classes('p-4 w-96 space-y-3'):
             ui.label('Link Database Source Profile').classes('text-sm font-bold text-blue-600')
