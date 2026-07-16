@@ -53,6 +53,11 @@ class RIIDCoreService:
         self.current_isotope_id = "Standby"
         self.status_text = "System Initialized"
         
+        # Tracks whether the last survey was halted by the operator (STOP) while
+        # holding valid spectrum data, so the plot can keep rendering it "frozen"
+        # instead of disappearing once the state leaves ACQUIRING_SURVEY.
+        self.survey_stopped_with_data = False
+        
         # Interlock safety configuration tracking flags
         self.hardware_sync_required = True  
 
@@ -232,6 +237,7 @@ class RIIDCoreService:
         
         self.live_spectrum = []
         self.survey_elapsed_seconds = 0
+        self.survey_stopped_with_data = False
         self.state = 'ACQUIRING_SURVEY'
         self.current_isotope_id = "Accumulating Counts..."
         self._main_loop_task = asyncio.create_task(self._continuous_survey_sequence())
@@ -361,16 +367,24 @@ class RIIDCoreService:
         self.state = 'IDLE'; self.batch_status_text = "Batch measurements finished successfully."
 
     def stop_execution(self):
-        """Forces runtime processing threads to drop cleanly."""
-        logger.warning(f"[SERVICE] Operator pressed STOP button. Forcing immediate pipeline cancellation out of state: {self.state}")
-        self.state = 'IDLE'; self.status_text = "Halted by Operator"; self.batch_status_text = "Halted by Operator"; self.current_isotope_id = "Standby"
+        """Halts the active acquisition loop without discarding the collected spectrum.
+        The last spectrum trace and identification result are left exactly as they were
+        so the operator can still review what was captured before pressing STOP."""
+        logger.warning(f"[SERVICE] Operator pressed STOP button. Halting acquisition out of state: {self.state}")
+        was_survey = self.state == 'ACQUIRING_SURVEY'
+        
+        self.state = 'IDLE'
+        self.batch_status_text = "Halted by Operator"
+        
+        if was_survey:
+            # Freeze the plot/ID at their last values instead of resetting to Standby.
+            self.survey_stopped_with_data = bool(self.live_spectrum)
+            self.status_text = "Survey Stopped - Showing Last Spectrum"
+        else:
+            self.status_text = "Halted by Operator"
+            self.current_isotope_id = "Standby"
+        
         if self._main_loop_task: self._main_loop_task.cancel()
-
-    def reset_service_state(self):
-        """Wipes transient memory traces."""
-        logger.info("[SERVICE] Operator requested clear and factory calibration state memory purge.")
-        self.stop_execution(); self.live_spectrum = []; self.batch_spectrum = []; self.background_spectrum = []
-        self.status_text = "System Cleared & Reset"; self.batch_status_text = "Ready to acquire file records."; self.current_isotope_id = "Standby"
 
     def verify_runtime_hardware_safety(self) -> bool:
         """Validates live connectivity during active data collection runs. Auto-halts on failure."""

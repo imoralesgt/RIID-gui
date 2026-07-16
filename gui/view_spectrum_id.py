@@ -29,7 +29,9 @@ class SpectrumPlotContainer:
             return
 
         # 1. Resolve channel dimensions cleanly to manage mapping sizes
-        num_channels = len(spectrum_data) if (spectrum_data and current_state == 'ACQUIRING_SURVEY') else len(bg_data)
+        show_frozen_survey = getattr(self.service, 'survey_stopped_with_data', False)
+        live_trace_active = spectrum_data and (current_state == 'ACQUIRING_SURVEY' or show_frozen_survey)
+        num_channels = len(spectrum_data) if live_trace_active else len(bg_data)
         if num_channels == 0 and spectrum_data:
             num_channels = len(spectrum_data)
             
@@ -37,7 +39,7 @@ class SpectrumPlotContainer:
         
         # 2. Lifecycle step: Calculate the active real-time CPS metrics directly from MCA timers
         cps_val_string = "0.00"
-        if current_state == 'ACQUIRING_SURVEY' and spectrum_data:
+        if (current_state == 'ACQUIRING_SURVEY' or show_frozen_survey) and spectrum_data:
             total_cts = sum(spectrum_data)
             survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
             survey_secs = float(survey_ms / 1000.0)
@@ -144,7 +146,8 @@ class SpectrumPlotContainer:
         """Applies safe log filters and overlays the main active survey line with integrated label CPS readouts and scale-dependent shading."""
         peak_y = current_peak_y
         
-        if state == 'ACQUIRING_SURVEY' and spectrum_data and len(spectrum_data) == num_channels and sum(spectrum_data) > 0:
+        if spectrum_data and len(spectrum_data) == num_channels and sum(spectrum_data) > 0 and \
+           (state == 'ACQUIRING_SURVEY' or getattr(self.service, 'survey_stopped_with_data', False)):
             live_max = float(max(spectrum_data))
             if live_max > peak_y:
                 peak_y = live_max
@@ -152,7 +155,10 @@ class SpectrumPlotContainer:
             processed_live_y = [val if val > 0 else 0.1 for val in spectrum_data] if use_log else spectrum_data
             
             # FIXED: Dynamically embed the current CPS metrics straight into the plot trace name label string
-            legend_label_name = f"Live Survey Session ({cps_string} CPS)"
+            if state == 'ACQUIRING_SURVEY':
+                legend_label_name = f"Live Survey Session ({cps_string} CPS)"
+            else:
+                legend_label_name = f"Last Survey (Stopped, {cps_string} CPS)"
             
             if use_log:
                 # FIXED MODIFICATION: No area shading fill is added under the curve when in log scale
@@ -259,12 +265,8 @@ class ControlPanelSidebar:
             self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
             
             with ui.row().classes('w-full gap-2 no-wrap pt-1'):
-                self.start_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_start)
-                self.start_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
-                self.stop_btn = ui.button('STOP', icon='stop', on_click=self.trigger_stop)
-                self.stop_btn.style("background-color: #EF4444; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
-                self.reset_btn = ui.button('CLEAR', icon='refresh', on_click=self.trigger_reset)
-                self.reset_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
+                self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
+                self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
 
     def _toggle_plot_scale(self, value: bool):
         logger.info(f"[USER_ACTION] Operator modified counts scaling preference selection -> use_log_scale={value}")
@@ -273,6 +275,15 @@ class ControlPanelSidebar:
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND PROFILE button. Duration: {self.bg_time_input.value}s")
         self.service.start_background_recording(int(self.bg_time_input.value or 30))
+
+    def trigger_play_stop_toggle(self):
+        """Single control that starts a survey when idle, or halts it when running.
+        Replaces the old separate START/STOP/CLEAR buttons - STOP no longer wipes
+        the spectrum, so a dedicated RESTART/CLEAR action is unnecessary."""
+        if self.service.state == 'IDLE':
+            self.trigger_start()
+        else:
+            self.trigger_stop()
 
     def trigger_start(self):
         logger.warning(f"[USER_ACTION] Operator clicked START continuous survey. trigger={self.min_cnt_input.value} cts | reset={self.max_cnt_input.value} cts")
@@ -283,10 +294,6 @@ class ControlPanelSidebar:
     def trigger_stop(self):
         logger.warning("[USER_ACTION] Operator clicked STOP survey button.")
         self.service.stop_execution()
-
-    def trigger_reset(self):
-        logger.warning("[USER_ACTION] Operator clicked CLEAR/RESET workspace memory lines.")
-        self.service.reset_service_state()
 
     def refresh_widget_states(self):
         """Monitors status variables and dynamically updates the panel metrics text strings."""
@@ -330,6 +337,17 @@ class ControlPanelSidebar:
             self.bg_progress_bar.set_value(0.0)
 
         self.bg_btn.set_visibility(is_idle and hw_ok)
-        self.start_btn.set_visibility(is_idle and hw_ok and has_bg)
-        self.stop_btn.set_visibility(not is_idle)
-        self.reset_btn.set_visibility(is_idle)
+
+        # Single toggle button: shows START when idle (ready to run), STOP while a
+        # survey/background/batch run is in progress. No separate RESTART/CLEAR
+        # control - STOP no longer erases the spectrum, so it isn't needed.
+        if is_idle:
+            self.play_stop_btn.set_text('START')
+            self.play_stop_btn.props('icon=play_arrow')
+            self.play_stop_btn.style("background-color: #10B981; font-weight: bold;")
+        else:
+            self.play_stop_btn.set_text('STOP')
+            self.play_stop_btn.props('icon=stop')
+            self.play_stop_btn.style("background-color: #EF4444; font-weight: bold;")
+
+        self.play_stop_btn.set_visibility((is_idle and hw_ok and has_bg) or not is_idle)
