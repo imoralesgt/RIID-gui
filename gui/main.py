@@ -91,7 +91,7 @@ class RIIDSpectroscopyApp:
                     SpectrumRecordingPanel(backend_service)
 
                 with ui.tab_panel(self.tab_hardware).classes('p-0 m-0 bg-transparent'):
-                    self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title)
+                    self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title, push_profile_callback=backend_service.push_active_profile_to_board)
 
     def global_ui_sync_tick(self):
         """Drives all real-time component updates and handles dynamic layout changes."""
@@ -140,10 +140,11 @@ class RIIDSpectroscopyApp:
             self.banner_text.set_text("⚠️ MCA HARDWARE CRITICAL FAILURE: Connection broken or device disconnected. Checking port link auto-discovery loop...")
             self.banner_status_pill.set_text("DISCONNECTED").classes(add='bg-red-100 text-red-800', remove='bg-green-100 text-green-800')
 
-        # Master layout tick loop evaluation statement
-        if backend_service.hardware_sync_required and backend_service.is_hardware_available:
-            logger.warning("[UI_TICK] Active sync required state is flagged. Redirecting execution to board programming logic...")
-            backend_service.push_active_profile_to_board()
+        # NOTE: DPP parameters are no longer pushed to the board from this polling tick.
+        # They are only ever transmitted by push_active_profile_to_board(), which is
+        # called explicitly from: (1) initial hardware probe on app/service launch,
+        # (2) the operator pressing COMMIT CALIBRATION PARAMETERS, and (3) hardware
+        # reconnection recovery in the heartbeat loop.
 
 
 @ui.page('/')
