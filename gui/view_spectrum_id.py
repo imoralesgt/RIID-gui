@@ -5,24 +5,63 @@ from nicegui import ui
 from config import BRAND_COLORS, get_rgba_fill, logger
 
 class SpectrumPlotContainer:
+    # Fixed on purpose: Plotly only resets the user's manual zoom/pan when this
+    # value CHANGES between renders. Keeping it constant across every data update
+    # means autozoom happens only via the user's own action (double-click on the
+    # plot, or the toolbar's Autoscale/Reset-axes button) - never automatically.
+    PLOT_UIREVISION = 'riid_spectrum_plot'
+
     def __init__(self, service):
         self.service = service
         self.container = ui.column().classes('w-full items-center justify-center rounded-lg border p-2 bg-white')
         self.riid_label = ui.label("ID: Standby").classes('text-2xl font-black uppercase tracking-wide px-3 py-2 rounded w-full border')
         self.riid_label.style(f"color: {BRAND_COLORS['crimson_trace']}; background-color: #FEF2F2; border-color: #FEE2E2; border-left: 6px solid {BRAND_COLORS['crimson_trace']};")
+        
+        # Tracks the last state actually rendered into the plot, so the heavy
+        # container.clear()+ui.plotly() redraw can be skipped when nothing is
+        # actively being recorded and nothing has actually changed (issue #43:
+        # the plot was blinking every second even while fully idle).
+        self._last_render_signature = None
+        
+        # The live ui.plotly widget, kept alive and updated in place (rather than
+        # torn down and recreated) across data refreshes so the browser-side plot
+        # instance - and therefore the user's zoom/pan state - persists. Only reset
+        # to None when we fall back to the standby splash card (nothing to plot).
+        self._plot_widget = None
 
     def update_ui_elements(self):
         """Master orchestrator driving dynamic component layers stacking order and layout configurations."""
         self.riid_label.set_text(f"ID: {self.service.current_isotope_id}")
-        self.container.clear()
         
         spectrum_data = self.service.live_spectrum
         bg_data = self.service.background_spectrum
         current_state = self.service.state
         use_log = getattr(self.service, 'use_log_scale', True)
         
+        is_actively_recording = current_state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+        
+        # Cheap fingerprint of everything that could visually change the plot. While
+        # nothing is actively being recorded, only redraw if this actually differs
+        # from the last render (e.g. STOP freezing the trace, CLEAR wiping it, the
+        # log-scale toggle) instead of rebuilding the identical figure every tick.
+        render_signature = (
+            current_state,
+            len(spectrum_data) if spectrum_data else 0,
+            sum(spectrum_data) if spectrum_data else 0,
+            len(bg_data) if bg_data else 0,
+            sum(bg_data) if bg_data else 0,
+            bool(use_log),
+            bool(getattr(self.service, 'survey_stopped_with_data', False)),
+        )
+        
+        if not is_actively_recording and render_signature == self._last_render_signature:
+            return
+        self._last_render_signature = render_signature
+        
         # Guard: If no spectrum data is captured anywhere, draw the standby splash card
         if not spectrum_data and not bg_data:
+            self.container.clear()
+            self._plot_widget = None
             with self.container, ui.column().classes('w-full h-[360px] items-center justify-center p-4 text-center text-zinc-400 gap-1'):
                 ui.icon('analytics', size='lg').style(f"color: {BRAND_COLORS['accent']};")
                 ui.label("Spectrometer Standby - Click Start on Console").classes('text-xs font-bold text-zinc-700')
@@ -73,11 +112,24 @@ class SpectrumPlotContainer:
                 'paper_bgcolor': BRAND_COLORS['plot_paper'], 
                 'showlegend': True,
                 'barmode': 'overlay',
-                'legend': {'font': {'size': 8}, 'x': 0.70, 'y': 0.95, 'bgcolor': get_rgba_fill('legend_bg', alpha=0.7)}
+                'legend': {'font': {'size': 8}, 'x': 0.70, 'y': 0.95, 'bgcolor': get_rgba_fill('legend_bg', alpha=0.7)},
+                'uirevision': self.PLOT_UIREVISION,
             }
         }
-        with self.container:
-            ui.plotly(fig).classes('w-full h-[360px]')
+        
+        if self._plot_widget is None:
+            # First time we have data to show (or coming back from the standby
+            # splash) - build the widget fresh. From here on, subsequent updates
+            # reuse this same instance instead of recreating it.
+            self.container.clear()
+            with self.container:
+                self._plot_widget = ui.plotly(fig).classes('w-full h-[360px]')
+        else:
+            # Push new data into the existing widget via Plotly.react() under the
+            # hood - this is what actually preserves the user's zoom/pan, since the
+            # underlying graph DOM node is never torn down.
+            self._plot_widget.figure = fig
+            self._plot_widget.update()
 
 
     def _get_energy_axis(self, num_channels: int) -> list:
