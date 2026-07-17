@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime
 from config import logger, DATA_DIR
 from core.daq_commands import DaqCommands
+from core.daq_constants import DppSubmodules
+from core.dpp_parameters import Dpp_Timers
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
 

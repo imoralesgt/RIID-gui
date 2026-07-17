@@ -1,23 +1,30 @@
 {
   "G082": {
     "isotope": "Cs-137",
-    "activity": 666.50,
+    "activity": 666.5,
     "date": "2015/07/06",
     "type": "Source",
     "form": "point"
   },
   "G083": {
     "isotope": "Co-60",
-    "activity": 370.00,
+    "activity": 370.0,
     "date": "2021/01/15",
     "type": "Standard",
     "form": "cylinder"
   },
   "G084": {
     "isotope": "Ba-133",
-    "activity": 250.00,
+    "activity": 250.0,
     "date": "2018/11/20",
     "type": "Environmental",
     "form": "bulk"
+  },
+  "G099": {
+    "isotope": "Eu-152",
+    "activity": 350.0,
+    "date": "2021/12/01",
+    "type": "Source",
+    "form": "point"
   }
 }
