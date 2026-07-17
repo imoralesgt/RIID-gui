@@ -155,21 +155,20 @@ class RIIDCoreService:
             return False
 
     def _set_timers_preset(self, preset_ms: int) -> bool:
-        """Updates ONLY the Timers DPP submodule (group 4, which holds the Preset
-        register tied to Timer C) on the ALREADY-programmed board handle, so a
-        survey/background/batch run can configure its exact millisecond collection
-        window on the hardware's own clock.
+        """Updates ONLY the Preset register (Timer C collection window) on the
+        ALREADY-programmed board handle, so a survey/background/batch run can
+        configure its exact millisecond collection window on the hardware's
+        own clock - without resending any other DPP parameter group (shaper,
+        gain, BLR, etc.), which stays reserved for push_active_profile_to_board()
+        only (hardware probe / an explicit calibration commit).
         
-        This deliberately does NOT go through reinitialize_daq_handle() / recreate
-        self.daq_device - doing so would resend every other DPP submodule (shaper,
-        gain, BLR, etc.), which is reserved for push_active_profile_to_board() only
-        (hardware probe / an explicit calibration commit). DaqCommands.set_dpp_params()
-        transmits just the one submodule group requested, leaving everything else on
-        the board untouched.
-        
-        The live/real-time flags mirror what reinitialize_daq_handle() already
-        configures (Timer C = live time, Timer A = real time) so this doesn't
-        silently change timer semantics - only the Preset value itself.
+        Delegates straight to DaqCommands.set_timers_preset(), the new
+        middleware-layer method added for this purpose (issue #34 in the
+        daq-core repo / issue #49 here). Application code no longer needs to
+        reach into the HAL - constructing Dpp_Timers or importing DppSubmodules
+        directly, as the earlier stopgap version of this method did - since the
+        Python API now owns that read-modify-write against the Timers DPP
+        submodule (group 4) internally.
         
         Returns True on success, False if there's no programmed handle or the
         transmission failed (callers should fall back to pure software timing)."""
@@ -177,14 +176,12 @@ class RIIDCoreService:
             logger.warning("[SERVICE] Cannot set timer preset - no programmed device handle available.")
             return False
         try:
-            self.daq_device.dpp.timers = Dpp_Timers(
-                tmr_preset_time=preset_ms,
-                tmr_c_lt=True,
-                tmr_a_lt=False,
-            )
-            self.daq_device.set_dpp_params(DppSubmodules.TIMERS)
-            logger.info(f"[SERVICE] Timer preset updated to {preset_ms} ms (Timers submodule only, no other DPP groups resent).")
-            return True
+            success = self.daq_device.set_timers_preset(preset_ms)
+            if success:
+                logger.info(f"[SERVICE] Timer preset updated to {preset_ms} ms (Timers submodule only, no other DPP groups resent).")
+            else:
+                logger.warning(f"[SERVICE] Timer preset update to {preset_ms} ms was not acknowledged by the board.")
+            return success
         except Exception as e:
             logger.error(f"[SERVICE] Failed to set timer preset: {e}", exc_info=True)
             return False
