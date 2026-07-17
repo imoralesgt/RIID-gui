@@ -152,6 +152,38 @@ class RIIDCoreService:
             logger.error(f"[MCA_PROG] Master parameter injection failed: {e}", exc_info=True)
             return False
 
+    def _set_timers_preset(self, preset_ms: int) -> bool:
+        """Updates ONLY the Preset register (Timer C collection window) on the
+        ALREADY-programmed board handle, so a survey/background/batch run can
+        configure its exact millisecond collection window on the hardware's
+        own clock - without resending any other DPP parameter group (shaper,
+        gain, BLR, etc.), which stays reserved for push_active_profile_to_board()
+        only (hardware probe / an explicit calibration commit).
+        
+        Delegates straight to DaqCommands.set_timers_preset(), the new
+        middleware-layer method added for this purpose (issue #34 in the
+        daq-core repo / issue #49 here). Application code no longer needs to
+        reach into the HAL - constructing Dpp_Timers or importing DppSubmodules
+        directly, as the earlier stopgap version of this method did - since the
+        Python API now owns that read-modify-write against the Timers DPP
+        submodule (group 4) internally.
+        
+        Returns True on success, False if there's no programmed handle or the
+        transmission failed (callers should fall back to pure software timing)."""
+        if self.daq_device is None:
+            logger.warning("[SERVICE] Cannot set timer preset - no programmed device handle available.")
+            return False
+        try:
+            success = self.daq_device.set_timers_preset(preset_ms)
+            if success:
+                logger.info(f"[SERVICE] Timer preset updated to {preset_ms} ms (Timers submodule only, no other DPP groups resent).")
+            else:
+                logger.warning(f"[SERVICE] Timer preset update to {preset_ms} ms was not acknowledged by the board.")
+            return success
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to set timer preset: {e}", exc_info=True)
+            return False
+
     async def initialize_and_probe(self):
         """Asynchronously discovers hardware on startup sequence."""
         logger.info("[SERVICE] Executing physical hardware device inquiry sweep...")
@@ -235,6 +267,13 @@ class RIIDCoreService:
             logger.error("[BACKGROUND_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
             self.status_text = "BG Error: Board not programmed"; self.state = 'IDLE'
             return
+        
+        # Give the board's own clock millisecond-precision control over when Timer C
+        # (live time) stops, matching this run's requested duration. Falls back to
+        # pure software timing (with some overshoot) if this can't be set.
+        if not self._set_timers_preset(self.bg_target_time * 1000):
+            logger.warning("[BACKGROUND_RUN] Hardware timer preset could not be set - falling back to software-only timing.")
+        
         try:
             self.daq_device.open()
             self.daq_device.clear_spectrum()
@@ -277,6 +316,21 @@ class RIIDCoreService:
             logger.error(f"[BACKGROUND_RUN] Pipeline error: {e}", exc_info=True)
             self.status_text = f"BG Error: {e}"; self.state = 'IDLE'; self.bg_progress = 0.0
         finally:
+            # Runs on every exit path - normal completion, an error above, or an
+            # aborted run (STOP pressed mid-BG, hardware lost, task cancelled).
+            # Without this, the hardware keeps silently accumulating counts (and
+            # Timer C keeps ticking) after a BG run ends, and self.live_spectrum -
+            # only ever meant as a live-display side-channel during THIS BG run -
+            # would be left behind for the next survey START to mistake for a
+            # prior survey accumulation to resume (the actual cause of the survey's
+            # first frame showing the just-recorded background spectrum).
+            try:
+                self.daq_device.data_acquisition_stop()
+                self.daq_device.clear_spectrum()
+                self.daq_device.timers_reset()
+            except Exception as e:
+                logger.error(f"[BACKGROUND_RUN] Failed to cleanly halt/clear hardware after BG capture: {e}", exc_info=True)
+            self.live_spectrum = []
             try: self.daq_device.close()
             except: pass
 
@@ -324,6 +378,17 @@ class RIIDCoreService:
             return
         try:
             self.daq_device.open()
+            
+            # Force the hardware Preset register back to "unlimited" before every
+            # survey start (fresh AND resume alike). A prior BG recording or batch
+            # run leaves the board's Preset at ITS target duration (see
+            # _set_timers_preset); if left unchanged, the survey would silently
+            # auto-stall the instant Timer C reaches that leftover value, well
+            # before the operator intends to stop. This only touches the Timers
+            # DPP submodule (group 4) - it does not clear BRAM/spectrum, so it's
+            # safe to call unconditionally without disturbing the resumed baseline.
+            if not self._set_timers_preset(self.MAX_32BIT_UINT):
+                logger.warning("[SURVEY_RUN] Could not reset timer preset to unlimited - survey may stall early if a prior BG/batch preset is still active on the board.")
             
             # Snapshot whatever was accumulated before this start - $AQ is about to wipe
             # the physical BRAM out from under us regardless of what we do here.
@@ -392,12 +457,23 @@ class RIIDCoreService:
                 else:
                     self.current_isotope_id = f"Accumulating ({total_counts}/{self.min_counts_trigger} cts)"
                     
-            try: self.daq_device.data_acquisition_stop()
-            except: pass
         except Exception as e:
             logger.error(f"[HARDWARE] Continuous survey thread encountered an exception: {e}", exc_info=True)
             self.status_text = f"Survey Error: {e}"; self.state = 'IDLE'
         finally:
+            # Runs on every exit path - normal loop exit, an error above, OR task
+            # cancellation (stop_execution() calls _main_loop_task.cancel(), which
+            # throws CancelledError into whatever await this coroutine is suspended
+            # on - almost always asyncio.sleep(1.0) mid-poll. CancelledError is a
+            # BaseException, so it skips the `except Exception` above entirely and
+            # previously skipped this stop call too, since it used to live right
+            # after the while loop instead of here. Without it, STOP left the
+            # hardware physically running: it kept accumulating real counts (later
+            # silently wiped by the next START's forced BRAM-clear) AND kept
+            # incrementing Timer C the whole time acquisition sat "stopped" - which
+            # is exactly what inflated the elapsed time relative to true counts.
+            try: self.daq_device.data_acquisition_stop()
+            except: pass
             try: self.daq_device.close()
             except: pass
             logger.info("[SURVEY_RUN] Shared master loop context released safely.")
@@ -418,6 +494,15 @@ class RIIDCoreService:
 
     async def _batch_recording_worker_loop(self):
         """Automated file system serialization thread worker array loop."""
+        # Every run in this batch shares the same target duration, so the hardware
+        # Preset register only needs to be set once here - not per run. This gives
+        # the board's own clock millisecond-precision control over when Timer C
+        # (live time) stops, rather than relying purely on the ~1s software poll
+        # below to detect "elapsed >= target" after the fact.
+        preset_ok = self._set_timers_preset(self.batch_target_time * 1000)
+        if not preset_ok:
+            logger.warning("[BATCH_WORKER] Hardware timer preset could not be set - falling back to software-only timing (expect some overshoot past the target duration).")
+        
         for run_idx in range(self.batch_total_runs):
             if self.state != 'BATCH_RECORDING': break
             self.batch_current_run = run_idx + 1
@@ -437,30 +522,153 @@ class RIIDCoreService:
                 logger.error(f"[BATCH_WORKER] Hardware access dropped during sequence initiation step: {e}", exc_info=True)
                 self.batch_status_text = f"Hardware error: {e}"; break
                 
-            while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
-                await asyncio.sleep(1.0)
-                if not self.verify_runtime_hardware_safety(): break
-                self.batch_elapsed_seconds = int(self.daq_device.timers_read()["tmr_c"] / 1000)
-                self.batch_spectrum = self.daq_device.read_spectrum()
-                self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
+            try:
+                while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
+                    await asyncio.sleep(1.0)
+                    if not self.verify_runtime_hardware_safety(): break
+                    self.batch_elapsed_seconds = int(self.daq_device.timers_read()["tmr_c"] / 1000)
+                    self.batch_spectrum = self.daq_device.read_spectrum()
+                    self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
+                    
+                if self.state != 'BATCH_RECORDING':
+                    return
                 
-            if self.state != 'BATCH_RECORDING': 
+                # Stop acquisition immediately so the on-board timers/spectrum freeze at
+                # this exact moment. Without this, acquisition keeps running physically
+                # while we perform the final reads below, so the reported live/real time
+                # drifts well past the requested target the longer those reads take.
+                try:
+                    self.daq_device.data_acquisition_stop()
+                except Exception as e:
+                    logger.error(f"[BATCH_WORKER] Failed to stop acquisition cleanly before final read: {e}", exc_info=True)
+                
+                final_spectrum = self.daq_device.read_spectrum()
+                
+                # Final timer read for the most accurate final live/real time values
+                # (used by both the .json and .spe metadata below). Safe to do now since
+                # acquisition is already stopped and the registers are no longer moving.
+                try:
+                    final_timers = self.daq_device.timers_read()
+                except Exception:
+                    final_timers = {}
+                
+                final_live_ms = float(final_timers.get("tmr_c", self.batch_elapsed_seconds * 1000) or self.batch_elapsed_seconds * 1000)
+                final_real_ms = float(final_timers.get("tmr_a", final_live_ms) or final_live_ms)
+                final_live_s = final_live_ms / 1000.0
+                final_real_s = final_real_ms / 1000.0
+                
+                time_now = datetime.now()
+                os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
+                file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
+                base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
+                spectrum_id = f"RUN_{run_idx}"
+                
+                # Single source of truth for both file formats below (issue #42: the
+                # .spe file was carrying less metadata than the .json - sources,
+                # attenuators, and detector info were missing from it).
+                metadata = self._build_spectrum_metadata(
+                    num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s
+                )
+                
+                logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
+                with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
+                    json.dump({"id": spectrum_id, "metadata": metadata, "data": final_spectrum}, jf, indent=2)
+                
+                logger.info(f"[BATCH_WORKER] Committing spectrum array spe to root: {base_filepath}.spe")
+                self._write_spe_file(
+                    filepath_base=base_filepath, spectrum_id=spectrum_id, spectrum=final_spectrum,
+                    metadata=metadata, live_time_s=final_live_s, real_time_s=final_real_s, time_now=time_now
+                )
+            finally:
+                # Always stop acquisition (harmless/idempotent if the explicit stop
+                # above already ran) and close this run's connection, no matter how
+                # the block above exited: normal completion, an aborted run (state
+                # changed externally), or task cancellation via STOP - which throws
+                # CancelledError straight through the awaited sleep, bypassing
+                # everything else in this block including the explicit stop above.
+                # Without this, a cancelled batch run left the hardware physically
+                # running (and the serial connection open) indefinitely.
+                try: self.daq_device.data_acquisition_stop()
+                except: pass
                 try: self.daq_device.close()
                 except: pass
-                return
-                
-            final_spectrum = self.daq_device.read_spectrum(); self.daq_device.close()
-            
-            time_now = datetime.now()
-            os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
-            file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
-            base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
-            
-            logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
-            with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
-                json.dump({"id": f"RUN_{run_idx}", "metadata": self.system.runtime_metadata, "data": final_spectrum}, jf, indent=2)
                 
         self.state = 'IDLE'; self.batch_status_text = "Batch measurements finished successfully."
+
+    def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float) -> dict:
+        """Assembles the full metadata block attached to a recorded spectrum. This is
+        the single source of truth reused by both the .json and .spe writers, so the
+        two file formats always carry identical information (issue #42: previously
+        the .spe file's $SPE_REM section only had a handful of fields while the
+        .json had richer metadata like sources/attenuators/detector info)."""
+        prof = self.system.hw_profile
+        rt = self.system.runtime_metadata
+        vga_gain = float(prof.get("vga_gain_coarse", 6.0) or 6.0)
+        return {
+            "Material type": rt.get("Material type", "Source"),
+            "Material form": rt.get("Material form", "point"),
+            "Sources": rt.get("Sources", []),
+            "Attenuators": rt.get("Attenuators", []),
+            "Detector type": prof.get("Detector type", "UNKNOWN"),
+            "Detector geometry": prof.get("Detector geometry", "UNKNOWN"),
+            "Detector size": prof.get("Detector size", "UNKNOWN"),
+            "Detector type number": prof.get("Detector type number", "UNKNOWN"),
+            "Detector serial number": prof.get("Detector serial number", "UNKNOWN"),
+            "Analyzer name": prof.get("Analyzer name", "UNKNOWN"),
+            "Analyzer serial number": self.system.serial_number,
+            "Analyzer gain (keV/ch)": vga_gain,
+            "Number of channels": num_channels,
+            "Energy calibration offset (keV)": prof.get("calib_a0", 0.0),
+            "Energy calibration linear (keV/ch)": prof.get("calib_a1", 1.0),
+            "Energy calibration quadratic (keV/ch2)": prof.get("calib_a2", 0.0),
+            "Spectrum acquisition date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Spectrum live time (s)": live_time_s,
+            "Sequence run index": run_idx,
+        }
+
+    def _write_spe_file(self, filepath_base: str, spectrum_id: str, spectrum: list,
+                         metadata: dict, live_time_s: float, real_time_s: float, time_now: datetime) -> None:
+        """Writes an ASCII IEC/ANSI-style .spe file whose $SPE_REM block mirrors the
+        SAME metadata dict written to the companion .json file (see
+        _build_spectrum_metadata), so the two formats never drift out of sync again.
+        Structure modeled after the separate reference utility's .spe writer."""
+        prof = self.system.hw_profile
+        num_channels = len(spectrum)
+        with open(f"{filepath_base}.spe", "w", encoding="ascii") as sf:
+            sf.write(f"$SPEC_ID:\n{spectrum_id}\n")
+            sf.write(f"$DATE_MEA:\n{time_now.strftime('%m/%d/%Y %H:%M:%S')}\n")
+            sf.write(f"$MEAS_TIM:\n{live_time_s:.2f} {real_time_s:.2f}\n")
+            sf.write("$SPE_REM:\n")
+            sf.write(f"Material Type: {metadata['Material type']}\n")
+            sf.write(f"Material Form: {metadata['Material form']}\n")
+            if metadata['Sources']:
+                for i, src in enumerate(metadata['Sources']):
+                    fields = ", ".join(f"{k}={v}" for k, v in src.items())
+                    sf.write(f"Source[{i}]: {fields}\n")
+            else:
+                sf.write("Sources: none\n")
+            if metadata['Attenuators']:
+                for i, att in enumerate(metadata['Attenuators']):
+                    fields = ", ".join(f"{k}={v}" for k, v in att.items())
+                    sf.write(f"Attenuator[{i}]: {fields}\n")
+            else:
+                sf.write("Attenuators: none\n")
+            sf.write(f"Detector Type: {metadata['Detector type']}\n")
+            sf.write(f"Detector Geometry: {metadata['Detector geometry']}\n")
+            sf.write(f"Detector Size: {metadata['Detector size']}\n")
+            sf.write(f"Detector Type Number: {metadata['Detector type number']}\n")
+            sf.write(f"Detector Serial Number: {metadata['Detector serial number']}\n")
+            sf.write(f"Analyzer Name: {metadata['Analyzer name']}\n")
+            sf.write(f"Analyzer Serial Number: {metadata['Analyzer serial number']}\n")
+            sf.write(f"Analyzer Gain (keV/ch): {metadata['Analyzer gain (keV/ch)']:.4f}\n")
+            sf.write(f"Number of Channels: {metadata['Number of channels']}\n")
+            sf.write(f"Sequence Run Index: {metadata['Sequence run index']:04d}\n")
+            sf.write("$MCA_CAL:\n3\n")
+            sf.write(f"{prof.get('calib_a0', 0.0):.7e} {prof.get('calib_a1', 1.0):.7e} {prof.get('calib_a2', 0.0):.7e}\n")
+            sf.write(f"$DATA:\n0 {num_channels - 1}\n")
+            for counts in spectrum:
+                sf.write(f"{int(counts)}\n")
+            sf.write("$ENDRECORD:\n")
 
     def stop_execution(self):
         """Halts the active acquisition loop without discarding the collected spectrum.
