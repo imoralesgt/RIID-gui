@@ -4,11 +4,31 @@ import sys
 import threading
 
 # 1. Base File System Directory and Root Log Path Mapping
+#
+# Restructured per issue #57: the flat data/ folder now separates persistent
+# configuration (conf/) from generated spectrum output (spectra/), and the
+# latter is further split by acquisition mode so future work (issues #44/#45 -
+# exporting background and RIID-tab spectra) has somewhere to write without
+# further reshuffling this structure again.
+#
+#   data/
+#    |-- conf/                  (detectors.json, sources.json - tracked in git)
+#    |-- spectra/
+#         |-- background/       (background captures - not yet written; #45)
+#         |-- batch/            (batch recording .spe/.json output - #42/#54)
+#         |-- riid/             (RIID-tab spectrum export - not yet written; #44)
 DATA_DIR = "data"
+CONF_DIR = os.path.join(DATA_DIR, "conf")
+SPECTRA_DIR = os.path.join(DATA_DIR, "spectra")
+SPECTRA_BACKGROUND_DIR = os.path.join(SPECTRA_DIR, "background")
+SPECTRA_BATCH_DIR = os.path.join(SPECTRA_DIR, "batch")
+SPECTRA_RIID_DIR = os.path.join(SPECTRA_DIR, "riid")
+
 LOG_FILENAME = "gui.log"
 LOG_FILE_PATH = LOG_FILENAME  # Targeted at the structural workspace root folder
 
-os.makedirs(DATA_DIR, exist_ok=True)
+for _dir in (DATA_DIR, CONF_DIR, SPECTRA_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_BATCH_DIR, SPECTRA_RIID_DIR):
+    os.makedirs(_dir, exist_ok=True)
 
 # 2. CLEAR ALL PRE-EXISTING implicit logger handlers to bypass root blocking traps
 root_logger = logging.getLogger()
@@ -99,8 +119,10 @@ def get_rgba_fill(color_key: str, alpha: float = 0.15) -> str:
 DETECTORS_DB_FILENAME = "detectors.json"
 SOURCES_DB_FILENAME = "sources.json"
 
-DETECTORS_DB_PATH = os.path.join(DATA_DIR, DETECTORS_DB_FILENAME)
-SOURCES_DB_PATH = os.path.join(DATA_DIR, SOURCES_DB_FILENAME)
+# Moved from data/ directly into data/conf/ (issue #57) - these two files must
+# be preserved/tracked in the repository, unlike the generated spectra output.
+DETECTORS_DB_PATH = os.path.join(CONF_DIR, DETECTORS_DB_FILENAME)
+SOURCES_DB_PATH = os.path.join(CONF_DIR, SOURCES_DB_FILENAME)
 
 HARDWARE_DEFAULTS = {
     "SYS-ID": "SYS-STANDBY",  

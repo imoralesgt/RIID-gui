@@ -6,7 +6,7 @@
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
     "vga_gain_coarse": 4.65,
-    "blr_s_threshold_gain": 3.5,
+    "blr_s_threshold_gain": 3.75,
     "smoothing_factor": 2,
     "invert_pulse": false,
     "calib_a0": -6.48382,

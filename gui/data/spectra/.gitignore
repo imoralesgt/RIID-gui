@@ -1,0 +1,4 @@
+# Generated spectrum output (issue #57) - never tracked in git. Applies
+# recursively to background/, batch/, and riid/ subfolders alike.
+*.spe
+*.json

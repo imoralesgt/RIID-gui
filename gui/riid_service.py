@@ -2,14 +2,17 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from config import logger, DATA_DIR
+from config import logger, SPECTRA_BATCH_DIR
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
 
 class RIIDCoreService:
-    # Centralized folder destination constant
-    OUTPUT_FOLDER = DATA_DIR
+    # Centralized folder destination constant (issue #57: was the flat DATA_DIR
+    # root - batch .spe/.json output now lives under data/spectra/batch/ so it
+    # can sit alongside the future background/riid export folders without
+    # everything being dumped into one directory).
+    OUTPUT_FOLDER = SPECTRA_BATCH_DIR
 
     # Programmatic class constant for the unsigned 32-bit hardware register gating limit (2^32 - 1)
     MAX_32BIT_UINT = int(2**32 - 1)
