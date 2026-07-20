@@ -299,7 +299,6 @@ class ControlPanelSidebar:
             with ui.column().classes('w-full gap-2 bg-zinc-800 p-3 rounded-md border border-zinc-700 shadow-inner'):
                 self.min_cnt_input = ui.number('ML Detection Threshold (cts)', value=self.service.min_counts_trigger, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
                 self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
-                self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
                 
                 self.scale_checkbox = ui.checkbox(
                     'Log-scale', 
@@ -310,21 +309,52 @@ class ControlPanelSidebar:
             with ui.column().classes('w-full p-3 bg-black border border-zinc-800 rounded-md gap-1 font-mono text-xs text-emerald-400'):
                 self.status_lbl = ui.label('SYSTEM: Syncing...')
                 self.bg_status_lbl = ui.label('BACKGROUND: Missing Profile')
-                
-            self.bg_progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 rounded transition-all').props('color=amber')
-            self.bg_progress_bar.set_visibility(False)
 
-            self.bg_btn = ui.button('RECORD BACKGROUND SPECTRUM', icon='security', on_click=self.trigger_bg)
-            self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
+            # ============ BACKGROUND SPECTRUM (collapsible) ============
+            # Recording/loading/storing a background is a secondary, occasional
+            # workflow compared to running a live survey - grouping it into a
+            # single collapsed-by-default panel keeps it one click away without
+            # competing for attention with the always-visible Live Survey
+            # controls below. Auto-expands while a capture is actively running
+            # (see refresh_widget_states) so its progress bar stays visible.
+            with ui.expansion('Background Spectrum', icon='security', value=False) \
+                    .classes('w-full bg-zinc-800 border border-zinc-700 rounded-md') \
+                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-300"') as self.bg_expansion:
+                with ui.column().classes('w-full gap-2 p-2'):
+                    self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
 
-            # Issue #45: lets the operator persist the latest recorded background
-            # spectrum to disk (data/spectra/background/), independent of any
-            # survey/batch activity. Hidden while a NEW background capture is in
-            # progress to avoid ambiguity about which background would be saved.
-            self._build_save_bg_modal()
-            self.save_bg_btn = ui.button('Store Background Spectrum', icon='save', on_click=self.open_save_bg_dialog)
-            self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
-            
+                    self.bg_progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 rounded transition-all').props('color=amber')
+                    self.bg_progress_bar.set_visibility(False)
+
+                    self.bg_btn = ui.button('RECORD BACKGROUND SPECTRUM', icon='security', on_click=self.trigger_bg)
+                    self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
+
+                    ui.separator().classes('bg-zinc-700')
+
+                    # Issue #44: lets the operator load an already-saved background
+                    # (see issue #45) instead of recording a fresh one. Purely
+                    # additive - the RECORD flow above is completely untouched.
+                    with ui.column().classes('w-full gap-1') as self.load_bg_group:
+                        with ui.row().classes('w-full gap-2 items-end'):
+                            self.bg_file_select = ui.select(options=[], label='Load Pre-Recorded Background').props('dense outlined dark').classes('flex-1 text-xs')
+                            ui.button(icon='refresh', on_click=self.refresh_bg_file_list).props('dense flat round').classes('text-zinc-300')
+                        self.load_bg_btn = ui.button('LOAD SELECTED BACKGROUND', icon='folder_open', on_click=self.trigger_load_bg)
+                        self.load_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
+                    self.refresh_bg_file_list()
+
+                    ui.separator().classes('bg-zinc-700')
+
+                    # Issue #45: lets the operator persist the latest recorded
+                    # background spectrum to disk (data/spectra/background/),
+                    # independent of any survey/batch activity. Hidden while a NEW
+                    # background capture is in progress to avoid ambiguity about
+                    # which background would be saved.
+                    self._build_save_bg_modal()
+                    self.save_bg_btn = ui.button('Store Background Spectrum', icon='save', on_click=self.open_save_bg_dialog)
+                    self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
+
+            # ============ LIVE SURVEY (always visible - primary workflow) ============
+            ui.label('Live Survey').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1')
             with ui.row().classes('w-full gap-2 no-wrap pt-1'):
                 self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
                 self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
@@ -338,6 +368,24 @@ class ControlPanelSidebar:
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
         self.service.start_background_recording(int(self.bg_time_input.value or 30))
+
+    def refresh_bg_file_list(self):
+        """Repopulates the load-background dropdown from whatever's currently
+        in data/spectra/background/ (via the service, which owns that path)."""
+        files = self.service.list_available_background_files()
+        self.bg_file_select.options = files
+        self.bg_file_select.update()
+
+    def trigger_load_bg(self):
+        filename = self.bg_file_select.value
+        logger.warning(f"[USER_ACTION] Operator clicked LOAD SELECTED BACKGROUND button. File: {filename}")
+        ok, msg = self.service.load_background_spectrum(filename)
+        if ok:
+            # A returned message containing a calibration mismatch is still a
+            # successful load, just one the operator should be aware of.
+            ui.notify(msg, type="warning" if "differs" in msg else "positive")
+        else:
+            ui.notify(msg, type="negative")
 
     def _build_save_bg_modal(self):
         """Prompt dialog for issue #45, requirement 5: asks for a file name
@@ -365,6 +413,7 @@ class ControlPanelSidebar:
                 if ok:
                     logger.warning(f"[USER_ACTION] Operator saved background spectrum: {msg}")
                     ui.notify(msg, type="positive")
+                    self.refresh_bg_file_list()
                     self.save_bg_dialog.close()
                 else:
                     ui.notify(msg, type="negative")
@@ -436,6 +485,9 @@ class ControlPanelSidebar:
             self.bg_status_lbl.style("color: #F87171;")
 
         if is_bg_running:
+            # Auto-open the collapsed panel so the operator sees progress without
+            # needing to manually expand it mid-capture.
+            self.bg_expansion.value = True
             self.bg_progress_bar.set_visibility(True)
             prog_val = getattr(self.service, 'bg_progress', 0.0)
             self.bg_progress_bar.set_value(prog_val)
@@ -445,11 +497,16 @@ class ControlPanelSidebar:
 
         self.bg_btn.set_visibility(is_idle and hw_ok)
 
+        # Issue #44: loading a pre-recorded background is only meaningful while
+        # idle (matches the backend's own state guard in load_background_spectrum).
+        self.load_bg_group.set_visibility(is_idle)
+
         # Issue #45: only offer saving when there's actually a background to
-        # save, and not while a new one is actively being captured (that would
-        # be ambiguous about which background gets written - the old committed
-        # one, or the in-progress capture).
-        self.save_bg_btn.set_visibility(has_bg and not is_bg_running)
+        # save, and only while fully idle - not during a new BG capture (which
+        # background would get written is ambiguous), and not during an active
+        # survey (keeps this control's visibility consistent with the
+        # load-background picker just above, and avoids saving mid-run).
+        self.save_bg_btn.set_visibility(has_bg and is_idle)
 
         # Single toggle button: shows START when idle (ready to run), STOP while a
         # survey/background/batch run is in progress. No separate RESTART/CLEAR
