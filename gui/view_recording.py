@@ -64,6 +64,43 @@ class SpectrumRecordingPanel:
                 
                 self.sources_table.on('delete_source', delete_source_handler)
                 self._build_append_modal()
+
+                # SHIELDING / ATTENUATORS: unlike Sources, there is no persisted
+                # database backing this list (no attenuators.json equivalent) - rows
+                # only ever exist in runtime_metadata['Attenuators'] for as long as
+                # this session lasts, and are recorded into whatever gets written to
+                # the output .spe/.json files next (see RIIDCoreService._write_spe_file
+                # / _build_spectrum_metadata, which already serialize this list
+                # generically - no backend changes were needed for this feature).
+                ui.label('Shielding Materials / Absorber Layers').classes('text-xs font-bold mt-3').style(f"color: {BRAND_COLORS['primary']};")
+
+                attenuator_columns = [
+                    {'name': 'MaterialSymbol', 'label': 'Material Element Symbol', 'field': 'Material Symbol', 'align': 'left'},
+                    {'name': 'Thickness', 'label': 'Thickness (mm)', 'field': 'Thickness (mm)', 'align': 'center'},
+                    {'name': 'Notes', 'label': 'Notes', 'field': 'Notes', 'align': 'left'},
+                    {'name': 'actions', 'label': 'Action Controls', 'field': 'actions', 'align': 'center'}
+                ]
+
+                self.attenuators_table = ui.table(columns=attenuator_columns, rows=self.system.runtime_metadata['Attenuators'], row_key='Material Symbol')
+                self.attenuators_table.props('dense flat bordered wrap-cells').classes('w-full text-xs').style('max-height: 160px;')
+                self.attenuators_table.add_slot('body-cell-actions', r'''
+                    <q-td :props="props">
+                        <q-btn flat round dense icon="delete" size="sm" color="negative" @click="$parent.$emit('delete_attenuator', props.row)" />
+                    </q-td>
+                ''')
+
+                def delete_attenuator_handler(msg):
+                    row_to_del = msg.args
+                    logger.warning(f"[USER_ACTION] Operator deleted shielding/absorber layer row match: {row_to_del['Material Symbol']}")
+                    self.system.runtime_metadata['Attenuators'] = [
+                        a for a in self.system.runtime_metadata['Attenuators']
+                        if not (a['Material Symbol'] == row_to_del['Material Symbol'] and a.get('Thickness (mm)') == row_to_del.get('Thickness (mm)'))
+                    ]
+                    self.attenuators_table.rows = self.system.runtime_metadata['Attenuators']
+                    ui.notify("Shielding layer removed.", color=BRAND_COLORS['crimson_trace'])
+
+                self.attenuators_table.on('delete_attenuator', delete_attenuator_handler)
+                self._build_shielding_modal()
             # RIGHT CARD: Persistent Plotly Canvas and Polling Controllers Readout
             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 50%; border-color: #E2E8F0;'):
                 ui.label('Batch Recording Output & Controls').classes('text-xs font-bold uppercase tracking-wider text-zinc-700')
@@ -109,14 +146,16 @@ class SpectrumRecordingPanel:
         else:
             self.progress_bar.set_value(0.0)
         
-        # The Sources list is read fresh into each run's metadata (see
-        # RIIDCoreService._build_spectrum_metadata) - mutating it mid-batch would
+        # The Sources/Attenuators lists are read fresh into each run's metadata (see
+        # RIIDCoreService._build_spectrum_metadata) - mutating them mid-batch would
         # make different runs in the same batch carry inconsistent metadata, so
         # appending is blocked for the whole duration of a batch recording.
         if is_batch:
             self.add_source_btn.disable()
+            self.add_shielding_btn.disable()
         else:
             self.add_source_btn.enable()
+            self.add_shielding_btn.enable()
         
         spectrum = self.service.batch_spectrum
         render_signature = (len(spectrum) if spectrum else 0, sum(spectrum) if spectrum else 0)
@@ -313,3 +352,55 @@ class SpectrumRecordingPanel:
         # Disabled while a batch recording is active (see sync_ui_state) so the
         # Sources list stays stable across every run within the same batch.
         self.add_source_btn = ui.button('Add Radioactive Source Entry', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
+
+    def _build_shielding_modal(self):
+        """Add-a-shielding-layer dialog. Unlike sources, there is no database
+        backing this - no "use existing" mode, no persistence file, nothing to
+        select from. Every row lives only in runtime_metadata['Attenuators'] for
+        this session, and gets recorded into whatever spectrum is captured next."""
+        with ui.dialog() as shielding_dialog, ui.card().classes('p-4 w-96 space-y-3'):
+            ui.label('Add New Shielding Layer / Absorber Row').classes('text-sm font-bold text-blue-600')
+
+            symbol_input = ui.input('Material Symbol', placeholder='e.g. Pb, Al, Cu').props('dense outlined').classes('w-full text-xs')
+            thickness_input = ui.number('Thickness (mm)', value=1.0, format='%.2f', min=0).props('dense outlined').classes('w-full text-xs')
+            # Same handling as the per-source Notes field: free text, not persisted
+            # to any database (there is none for shielding), only written into the
+            # output .spe/.json spectrum files via runtime_metadata['Attenuators'].
+            notes_input = ui.textarea('Notes', placeholder='e.g. layer purpose, positioning - not saved to any database.') \
+                .props('dense outlined rows=2').classes('w-full text-xs')
+
+            def commit_shielding_entry():
+                # Backstop guard, mirroring the sources dialog: the trigger button is
+                # disabled during a batch (see sync_ui_state), but a dialog already
+                # open before the batch started wouldn't be caught by that alone.
+                if self.service.state == 'BATCH_RECORDING':
+                    ui.notify("Cannot modify shielding layers while a batch recording is running.", type="negative")
+                    return
+
+                symbol = str(symbol_input.value or '').strip()
+                if not symbol:
+                    ui.notify("Enter a material symbol first.", type="negative")
+                    return
+
+                logger.info(f"[USER_ACTION] Appended shielding/absorber layer '{symbol}' into the transient run parameters.")
+                self.system.runtime_metadata['Attenuators'].append({
+                    "Material Symbol": symbol,
+                    "Thickness (mm)": f"{float(thickness_input.value if thickness_input.value is not None else 0):.2f} mm",
+                    "Notes": str(notes_input.value or "").strip()
+                })
+                self.attenuators_table.rows = self.system.runtime_metadata['Attenuators']
+                shielding_dialog.close()
+
+                # Reset for the next entry rather than leaving stale values behind.
+                symbol_input.set_value('')
+                thickness_input.set_value(1.0)
+                notes_input.set_value('')
+
+            with ui.row().classes('w-full gap-2 pt-1'):
+                ui.button('Cancel', on_click=shielding_dialog.close).props('dense outline').classes('flex-1')
+                ui.button('Add Shielding', icon='check', on_click=commit_shielding_entry).props('dense color=primary').classes('flex-1')
+
+        # Disabled while a batch recording is active (see sync_ui_state), same
+        # reasoning as add_source_btn: the Attenuators list must stay stable
+        # across every run within the same batch.
+        self.add_shielding_btn = ui.button('Append Shielding', icon='add', on_click=shielding_dialog.open).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
