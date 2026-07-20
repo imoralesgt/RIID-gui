@@ -108,6 +108,15 @@ class SpectrumRecordingPanel:
         else:
             self.progress_bar.set_value(0.0)
         
+        # The Sources list is read fresh into each run's metadata (see
+        # RIIDCoreService._build_spectrum_metadata) - mutating it mid-batch would
+        # make different runs in the same batch carry inconsistent metadata, so
+        # appending is blocked for the whole duration of a batch recording.
+        if is_batch:
+            self.add_source_btn.disable()
+        else:
+            self.add_source_btn.enable()
+        
         spectrum = self.service.batch_spectrum
         render_signature = (len(spectrum) if spectrum else 0, sum(spectrum) if spectrum else 0)
         
@@ -255,6 +264,14 @@ class SpectrumRecordingPanel:
                 return False
 
             def commit_source_selection():
+                # Backstop guard: the trigger button below is disabled while a batch
+                # is running (see sync_ui_state), but if this dialog was already open
+                # before the batch started, that alone wouldn't stop it - the Sources
+                # list must not change mid-batch (see sync_ui_state for why).
+                if self.service.state == 'BATCH_RECORDING':
+                    ui.notify("Cannot modify sources while a batch recording is running.", type="negative")
+                    return
+
                 target_code = resolve_target_code()
                 if not target_code:
                     ui.notify("Please select a Source ID or register a new one.", type="negative")
@@ -284,4 +301,6 @@ class SpectrumRecordingPanel:
                 ui.button('Save to DB', icon='save', on_click=save_to_database).props('dense outline color=primary').classes('flex-1')
                 ui.button('Append into Run', icon='add_circle', on_click=commit_source_selection).props('dense color=primary').classes('flex-1')
 
-        ui.button('Add Radioactive Source Entry', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
+        # Disabled while a batch recording is active (see sync_ui_state) so the
+        # Sources list stays stable across every run within the same batch.
+        self.add_source_btn = ui.button('Add Radioactive Source Entry', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
