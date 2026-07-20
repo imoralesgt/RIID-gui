@@ -4,8 +4,6 @@ import asyncio
 from datetime import datetime
 from config import logger, DATA_DIR
 from core.daq_commands import DaqCommands
-from core.daq_constants import DppSubmodules
-from core.dpp_parameters import Dpp_Timers
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
 
@@ -609,6 +607,9 @@ class RIIDCoreService:
         return {
             "Material type": rt.get("Material type", "Source"),
             "Material form": rt.get("Material form", "point"),
+            # Each entry may carry its own "Notes" key (per-source, entered when the
+            # source was appended in the GUI) - deliberately NOT persisted to
+            # sources.json, only present here in the recorded spectrum's metadata.
             "Sources": rt.get("Sources", []),
             "Attenuators": rt.get("Attenuators", []),
             "Detector type": prof.get("Detector type", "UNKNOWN"),
@@ -636,6 +637,16 @@ class RIIDCoreService:
         Structure modeled after the separate reference utility's .spe writer."""
         prof = self.system.hw_profile
         num_channels = len(spectrum)
+
+        def sanitize_spe_text(value) -> str:
+            """Collapses to a single ASCII-safe line for embedding in the .spe
+            file's line-based $SPE_REM block. Free-text fields (e.g. a per-source
+            Notes entry) could otherwise contain newlines or non-ASCII characters
+            that would break the line format or crash the ascii-encoded write."""
+            text = str(value if value is not None else "")
+            text = text.replace('\r', ' ').replace('\n', ' | ')
+            return text.encode('ascii', errors='replace').decode('ascii')
+
         with open(f"{filepath_base}.spe", "w", encoding="ascii") as sf:
             sf.write(f"$SPEC_ID:\n{spectrum_id}\n")
             sf.write(f"$DATE_MEA:\n{time_now.strftime('%m/%d/%Y %H:%M:%S')}\n")
@@ -645,13 +656,16 @@ class RIIDCoreService:
             sf.write(f"Material Form: {metadata['Material form']}\n")
             if metadata['Sources']:
                 for i, src in enumerate(metadata['Sources']):
-                    fields = ", ".join(f"{k}={v}" for k, v in src.items())
+                    # Per-source "Notes" (if present) rides along automatically here -
+                    # it's just another key in each source's dict, sanitized like
+                    # every other field so it can't break the line format.
+                    fields = ", ".join(f"{k}={sanitize_spe_text(v)}" for k, v in src.items())
                     sf.write(f"Source[{i}]: {fields}\n")
             else:
                 sf.write("Sources: none\n")
             if metadata['Attenuators']:
                 for i, att in enumerate(metadata['Attenuators']):
-                    fields = ", ".join(f"{k}={v}" for k, v in att.items())
+                    fields = ", ".join(f"{k}={sanitize_spe_text(v)}" for k, v in att.items())
                     sf.write(f"Attenuator[{i}]: {fields}\n")
             else:
                 sf.write("Attenuators: none\n")

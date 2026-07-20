@@ -43,6 +43,7 @@ class SpectrumRecordingPanel:
                     {'name': 'Type', 'label': 'Type', 'field': 'Type', 'align': 'center'},
                     {'name': 'Form', 'label': 'Form', 'field': 'Form', 'align': 'center'},
                     {'name': 'Distance', 'label': 'Distance (cm)', 'field': 'Distance', 'align': 'center'},
+                    {'name': 'Notes', 'label': 'Notes', 'field': 'Notes', 'align': 'left'},
                     {'name': 'actions', 'label': 'Action Controls', 'field': 'actions', 'align': 'center'}
                 ]
                 
@@ -199,7 +200,14 @@ class SpectrumRecordingPanel:
             new_form = ui.input('Material Form Shape', value='point').props('dense outlined').classes('w-full text-xs')
 
             ui.markdown("--- *Volatile Geometrical Runtime Parameters* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
-            dist_input = ui.input('Distance to Detector (cm)', value='20').props('dense outlined').classes('w-full text-xs')
+            dist_input = ui.number('Distance to Detector (cm)', value=20.0, format='%.1f', min=0).props('dense outlined').classes('w-full text-xs')
+            # Per-source notes: tied to THIS specific append instance, not the
+            # persisted source record - deliberately excluded from save_to_database()
+            # below, so it never ends up in sources.json. Only written into whatever
+            # gets recorded into runtime_metadata['Sources'] (and from there, into
+            # the output .spe/.json spectrum files).
+            notes_input = ui.textarea('Notes (this instance only)', placeholder='e.g. shielding used, positioning details - not saved to the source database.') \
+                .props('dense outlined rows=2').classes('w-full text-xs')
 
             def apply_mode_visibility():
                 is_existing = mode_toggle.value == 'existing'
@@ -291,7 +299,8 @@ class SpectrumRecordingPanel:
                     "Date": metrics["date"],
                     "Type": metrics["type"], 
                     "Form": metrics["form"], 
-                    "Distance": f"{dist_input.value or '20'} cm"
+                    "Distance": f"{float(dist_input.value if dist_input.value is not None else 20):.1f} cm",
+                    "Notes": str(notes_input.value or "").strip()
                 })
                 self.sources_table.rows = self.system.runtime_metadata['Sources']
                 source_dialog.close()
