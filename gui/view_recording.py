@@ -156,35 +156,113 @@ class SpectrumRecordingPanel:
             self._plot_widget.update()
     def _build_append_modal(self):
         with ui.dialog() as source_dialog, ui.card().classes('p-4 w-96 space-y-3'):
-            ui.label('Link Database Source Profile').classes('text-sm font-bold text-blue-600')
-            avail_ids = list(self.system.sources_db.keys())
-            code_select = ui.select(options=avail_ids, label='Select Existing Source Code').props('dense outlined').classes('w-full')
-            
-            ui.markdown("--- *Or Register New Source into Database File* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
-            new_code_input = ui.input('New Source ID Code').props('dense outlined').classes('w-full text-xs')
+            ui.label('Link / Register Radiation Source').classes('text-sm font-bold text-blue-600')
+
+            # Clear two-mode split (issue #53, requirement 3): rather than showing
+            # an "existing source" dropdown and a "new source" form at the same time
+            # (confusing - not obvious which one actually applies), the operator
+            # explicitly picks a mode and only the relevant control is shown.
+            mode_toggle = ui.toggle(
+                {'existing': 'Use Existing Source', 'new': 'Register New Source'},
+                value='existing'
+            ).props('dense no-caps spread').classes('w-full')
+
+            with ui.column().classes('w-full gap-1') as existing_mode_group:
+                code_select = ui.select(
+                    options=list(self.system.sources_db.keys()),
+                    label='Select Existing Source Code'
+                ).props('dense outlined').classes('w-full')
+
+            with ui.column().classes('w-full gap-1') as new_mode_group:
+                new_code_input = ui.input('New Source ID Code').props('dense outlined').classes('w-full text-xs')
+
+            ui.markdown("--- *Source Properties* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
+
+            # Shared field set for both modes. In "Use Existing" mode these get
+            # auto-filled from sources.json the moment a code is picked (requirement
+            # 1), stay freely editable, and any edits are committed back to the
+            # database on Save/Append (requirement 2 - previously silently discarded
+            # for existing sources, only new ones were ever written back).
             new_iso = ui.input('Isotope Symbol', value='Cs-137').props('dense outlined').classes('w-full text-xs')
             new_act = ui.number('Reference Activity (kBq)', value=100.0, format='%.2f').props('dense outlined').classes('w-full text-xs')
             new_date = ui.input('Reference Date (YYYY/MM/DD)', value=datetime.now().strftime('%Y/%m/%d')).props('dense outlined').classes('w-full text-xs')
             new_type = ui.input('Material Type', value='Source').props('dense outlined').classes('w-full text-xs')
             new_form = ui.input('Material Form Shape', value='point').props('dense outlined').classes('w-full text-xs')
-            
+
             ui.markdown("--- *Volatile Geometrical Runtime Parameters* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
             dist_input = ui.input('Distance to Detector (cm)', value='20').props('dense outlined').classes('w-full text-xs')
-            
-            def commit_source_selection():
-                target_code = code_select.value
-                if new_code_input.value:
-                    target_code = str(new_code_input.value).strip()
-                    logger.warning(f"[USER_ACTION] Operator added a new isotope source configuration record into inventory library file: {target_code}")
-                    self.system.sources_db[target_code] = {
-                        "isotope": new_iso.value, "activity": float(new_act.value or 0.0),
-                        "date": new_date.value, "type": new_type.value, "form": new_form.value
-                    }
-                    self.system.save_sources_db()
-                    ui.notify(f"Source {target_code} saved to sources.json database.", type="positive")
 
-                if not target_code or target_code not in self.system.sources_db:
+            def apply_mode_visibility():
+                is_existing = mode_toggle.value == 'existing'
+                existing_mode_group.set_visibility(is_existing)
+                new_mode_group.set_visibility(not is_existing)
+                if not is_existing:
+                    # Fresh registration - clear out anything a prior "existing"
+                    # selection populated, back to sensible defaults.
+                    code_select.set_value(None)
+                    new_code_input.set_value('')
+                    new_iso.set_value('Cs-137')
+                    new_act.set_value(100.0)
+                    new_date.set_value(datetime.now().strftime('%Y/%m/%d'))
+                    new_type.set_value('Source')
+                    new_form.set_value('point')
+
+            def populate_fields_from_existing(code):
+                """Requirement 1: selecting an existing source must immediately
+                reflect its stored values in the fields above."""
+                metrics = self.system.sources_db.get(code) if code else None
+                if not metrics:
+                    return
+                new_iso.set_value(metrics.get('isotope', ''))
+                new_act.set_value(float(metrics.get('activity', 0.0)))
+                new_date.set_value(metrics.get('date', ''))
+                new_type.set_value(metrics.get('type', 'Source'))
+                new_form.set_value(metrics.get('form', 'point'))
+
+            mode_toggle.on_value_change(lambda e: apply_mode_visibility())
+            code_select.on_value_change(lambda e: populate_fields_from_existing(e.value))
+            apply_mode_visibility()
+
+            def resolve_target_code():
+                if mode_toggle.value == 'new':
+                    code = str(new_code_input.value or '').strip()
+                    return code or None
+                return code_select.value
+
+            def save_to_database() -> bool:
+                """Requirements 2 & 3: a standalone, explicit commit to sources.json -
+                works identically whether registering a brand new source or editing
+                an existing one's fields, so the operator doesn't need to also
+                append into the current run just to persist a correction."""
+                target_code = resolve_target_code()
+                if not target_code:
+                    ui.notify("Enter or select a Source ID first.", type="negative")
+                    return False
+                self.system.sources_db[target_code] = {
+                    "isotope": new_iso.value, "activity": float(new_act.value or 0.0),
+                    "date": new_date.value, "type": new_type.value, "form": new_form.value
+                }
+                if self.system.save_sources_db():
+                    logger.warning(f"[USER_ACTION] Operator committed source '{target_code}' to sources.json database (mode={mode_toggle.value}).")
+                    ui.notify(f"Source {target_code} saved to sources.json database.", type="positive")
+                    if mode_toggle.value == 'new':
+                        # Newly-registered source becomes selectable right away
+                        # without needing to reopen this dialog.
+                        code_select.options = list(self.system.sources_db.keys())
+                        code_select.update()
+                    return True
+                ui.notify("Failed to save source database.", type="negative")
+                return False
+
+            def commit_source_selection():
+                target_code = resolve_target_code()
+                if not target_code:
                     ui.notify("Please select a Source ID or register a new one.", type="negative")
+                    return
+
+                # Always commit current field values first - covers both a brand
+                # new registration and edits to an existing source's fields.
+                if not save_to_database():
                     return
 
                 metrics = self.system.sources_db[target_code]
@@ -201,8 +279,9 @@ class SpectrumRecordingPanel:
                 self.sources_table.rows = self.system.runtime_metadata['Sources']
                 source_dialog.close()
 
-            with ui.row().classes('w-full justify-between pt-1'):
-                ui.button('Append into Run', icon='add_circle', on_click=commit_source_selection).props('dense color=primary')
-                ui.button('Cancel', on_click=source_dialog.close).props('dense outline')
+            with ui.row().classes('w-full gap-2 pt-1'):
+                ui.button('Cancel', on_click=source_dialog.close).props('dense outline').classes('flex-1')
+                ui.button('Save to DB', icon='save', on_click=save_to_database).props('dense outline color=primary').classes('flex-1')
+                ui.button('Append into Run', icon='add_circle', on_click=commit_source_selection).props('dense color=primary').classes('flex-1')
 
         ui.button('Add Radioactive Source Entry', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
