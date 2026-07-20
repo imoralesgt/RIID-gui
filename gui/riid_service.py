@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from config import logger, SPECTRA_BATCH_DIR
+from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
@@ -307,14 +307,14 @@ class RIIDCoreService:
                 self.bg_accumulated_seconds = int(self.bg_hardware_live_time_ms / 1000)
                 
                 self.bg_progress = 1.0
-                self.status_text = "Background Profile Ready"
+                self.status_text = "Background Spectrum Ready"
                 self.current_isotope_id = "BG Complete. Ready for Survey."
                 self.state = 'IDLE'
 
                 # Update ML model background
                 self.ml_inference.update_bkgnd_data(new_bkgnd_data=self.background_spectrum, new_bkgnd_live_time=self.bg_accumulated_seconds)
 
-                logger.info(f"[BACKGROUND_RUN] Background profile saved. Pure HW Live-Time: {self.bg_hardware_live_time_ms} ms")
+                logger.info(f"[BACKGROUND_RUN] Background spectrum saved. Pure HW Live-Time: {self.bg_hardware_live_time_ms} ms")
         except Exception as e:
             logger.error(f"[BACKGROUND_RUN] Pipeline error: {e}", exc_info=True)
             self.status_text = f"BG Error: {e}"; self.state = 'IDLE'; self.bg_progress = 0.0
@@ -629,6 +629,8 @@ class RIIDCoreService:
             "Energy calibration quadratic (keV/ch2)": prof.get("calib_a2", 0.0),
             "Spectrum acquisition date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Spectrum live time (s)": live_time_s,
+            # issue #54, requirement 3: previously computed (final_real_s) but never
+            # actually passed through into this dict, so it never reached the JSON.
             "Spectrum real time (s)": real_time_s,
             "Sequence run index": run_idx,
         }
@@ -690,6 +692,81 @@ class RIIDCoreService:
                 sf.write(f"{int(counts)}\n")
             sf.write("$ENDRECORD:\n")
 
+    def save_background_spectrum(self, filename: str, save_json: bool = True, save_spe: bool = True) -> tuple[bool, str]:
+        """Persists the latest recorded background spectrum to disk (issue #45),
+        in JSON and/or SPE format as requested. Reuses the exact same
+        _build_spectrum_metadata()/_write_spe_file() pipeline as batch
+        recordings (issue #42's prerequisite) instead of duplicating any
+        serialization logic, so detector/calibration/source metadata is
+        included identically to how batch spectra files are stored.
+        
+        Per issue #45 requirement 4, "Material type" is forced to "background"
+        on a COPY of the metadata used for this save only - the live
+        runtime_metadata dict (used elsewhere for batch/sources) is left
+        untouched.
+        
+        Args:
+            filename (str): Desired base filename (without extension), as
+                chosen by the operator in the save prompt.
+            save_json (bool): Whether to write the .json file.
+            save_spe (bool): Whether to write the .spe file.
+        
+        Returns:
+            (bool, str): (success, message) - message is a short summary of
+            what was saved, or an error description for the UI to display.
+        """
+        if not self.background_spectrum:
+            return False, "No background spectrum has been recorded yet."
+        if not save_json and not save_spe:
+            return False, "Select at least one output format (JSON and/or SPE)."
+        
+        safe_filename = "".join(c for c in str(filename or "").strip() if c.isalnum() or c in ("_", "-", "."))
+        if not safe_filename:
+            return False, "Enter a valid file name."
+        
+        try:
+            os.makedirs(SPECTRA_BACKGROUND_DIR, exist_ok=True)
+            base_filepath = os.path.join(SPECTRA_BACKGROUND_DIR, safe_filename)
+            
+            live_time_s = float(self.bg_hardware_live_time_ms or 0.0) / 1000.0
+            # Background capture is a single manual collection window with only
+            # one hardware timer tracked for it (see _bg_recording_sequence) -
+            # live and real time are reported as equal, since no separate
+            # real-time register is read during that sequence.
+            real_time_s = live_time_s
+            
+            metadata = self._build_spectrum_metadata(
+                num_channels=len(self.background_spectrum), run_idx=0,
+                live_time_s=live_time_s, real_time_s=real_time_s
+            )
+            # Mark this saved file's Material type/form for a background capture,
+            # without mutating the live runtime_metadata dict (used elsewhere for
+            # batch/sources).
+            metadata["Material type"] = "background"
+            metadata["Material form"] = "Environmental"
+            
+            spectrum_id = f"BG_{safe_filename}"
+            time_now = datetime.now()
+            saved_files = []
+            
+            if save_json:
+                with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
+                    json.dump({"id": spectrum_id, "metadata": metadata, "data": self.background_spectrum}, jf, indent=2)
+                saved_files.append(f"{safe_filename}.json")
+            
+            if save_spe:
+                self._write_spe_file(
+                    filepath_base=base_filepath, spectrum_id=spectrum_id, spectrum=self.background_spectrum,
+                    metadata=metadata, live_time_s=live_time_s, real_time_s=real_time_s, time_now=time_now
+                )
+                saved_files.append(f"{safe_filename}.spe")
+            
+            logger.warning(f"[USER_ACTION] Operator saved background spectrum: {', '.join(saved_files)} -> {SPECTRA_BACKGROUND_DIR}")
+            return True, f"Saved {' and '.join(saved_files)}"
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to save background spectrum: {e}", exc_info=True)
+            return False, f"Failed to save background spectrum: {e}"
+
     def stop_execution(self):
         """Halts the active acquisition loop without discarding the collected spectrum.
         The last spectrum trace and identification result are left exactly as they were
@@ -722,7 +799,7 @@ class RIIDCoreService:
             logger.warning(f"[SERVICE] CLEAR request rejected. Core state is busy: {self.state}")
             return
         
-        logger.warning("[SERVICE] Operator pressed CLEAR button. Wiping accumulated survey spectrum (background profile preserved).")
+        logger.warning("[SERVICE] Operator pressed CLEAR button. Wiping accumulated survey spectrum (background spectrum preserved).")
         
         if self.state == 'ACQUIRING_SURVEY':
             # Let the active acquisition loop perform the actual hardware-level clear
