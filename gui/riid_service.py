@@ -567,7 +567,7 @@ class RIIDCoreService:
                 # .spe file was carrying less metadata than the .json - sources,
                 # attenuators, and detector info were missing from it).
                 metadata = self._build_spectrum_metadata(
-                    num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s
+                    num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s, real_time_s=final_real_s
                 )
                 
                 logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
@@ -595,7 +595,7 @@ class RIIDCoreService:
                 
         self.state = 'IDLE'; self.batch_status_text = "Batch measurements finished successfully."
 
-    def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float) -> dict:
+    def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float, real_time_s: float) -> dict:
         """Assembles the full metadata block attached to a recorded spectrum. This is
         the single source of truth reused by both the .json and .spe writers, so the
         two file formats always carry identical information (issue #42: previously
@@ -626,6 +626,7 @@ class RIIDCoreService:
             "Energy calibration quadratic (keV/ch2)": prof.get("calib_a2", 0.0),
             "Spectrum acquisition date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Spectrum live time (s)": live_time_s,
+            "Spectrum real time (s)": real_time_s,
             "Sequence run index": run_idx,
         }
 
