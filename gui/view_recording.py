@@ -61,6 +61,10 @@ class SpectrumRecordingPanel:
                     self.system.runtime_metadata['Sources'] = [s for s in self.system.runtime_metadata['Sources'] if s['Source ID'] != row_to_del['Source ID']]
                     self.sources_table.rows = self.system.runtime_metadata['Sources']
                     ui.notify(f"Source registry link purged.", color=BRAND_COLORS['crimson_trace'])
+                    # Makes the deleted code selectable again in the append dropdown
+                    # (set by _build_append_modal, called right below - safe to
+                    # reference here since this closure only runs later, on click).
+                    self._refresh_available_source_codes()
                 
                 self.sources_table.on('delete_source', delete_source_handler)
                 self._build_append_modal()
@@ -222,6 +226,24 @@ class SpectrumRecordingPanel:
                     label='Select Existing Source Code'
                 ).props('dense outlined').classes('w-full')
 
+            def refresh_available_source_codes():
+                """Front-end-only filter - NEVER writes to sources.json. Once a
+                source code has been appended into the active run list, it's
+                temporarily hidden from this dropdown so it can't be added twice.
+                Deleting it from the active list (delete_source_handler, in
+                render_layout) makes it selectable here again."""
+                appended_ids = {s['Source ID'] for s in self.system.runtime_metadata['Sources']}
+                available = [code for code in self.system.sources_db.keys() if code not in appended_ids]
+                code_select.options = available
+                code_select.update()
+                if code_select.value not in available:
+                    code_select.set_value(None)
+
+            # Exposed so delete_source_handler (defined earlier, in render_layout)
+            # can re-run this filter when a source is removed from the active list.
+            self._refresh_available_source_codes = refresh_available_source_codes
+            refresh_available_source_codes()
+
             with ui.column().classes('w-full gap-1') as new_mode_group:
                 new_code_input = ui.input('New Source ID Code').props('dense outlined').classes('w-full text-xs')
 
@@ -303,9 +325,9 @@ class SpectrumRecordingPanel:
                     ui.notify(f"Source {target_code} saved to sources.json database.", type="positive")
                     if mode_toggle.value == 'new':
                         # Newly-registered source becomes selectable right away
-                        # without needing to reopen this dialog.
-                        code_select.options = list(self.system.sources_db.keys())
-                        code_select.update()
+                        # without needing to reopen this dialog - routed through the
+                        # same filter so it still respects the active-sources hide.
+                        refresh_available_source_codes()
                     return True
                 ui.notify("Failed to save source database.", type="negative")
                 return False
@@ -342,6 +364,7 @@ class SpectrumRecordingPanel:
                     "Notes": str(notes_input.value or "").strip()
                 })
                 self.sources_table.rows = self.system.runtime_metadata['Sources']
+                refresh_available_source_codes()
                 source_dialog.close()
 
             with ui.row().classes('w-full gap-2 pt-1'):
@@ -349,9 +372,16 @@ class SpectrumRecordingPanel:
                 ui.button('Save to DB', icon='save', on_click=save_to_database).props('dense outline color=primary').classes('flex-1')
                 ui.button('Append into Run', icon='add_circle', on_click=commit_source_selection).props('dense color=primary').classes('flex-1')
 
+        def open_source_dialog():
+            # Defensive re-filter on every open: covers the case where a source was
+            # deleted from the active list (or appended from an earlier dialog
+            # session) since this dialog was last shown.
+            self._refresh_available_source_codes()
+            source_dialog.open()
+
         # Disabled while a batch recording is active (see sync_ui_state) so the
         # Sources list stays stable across every run within the same batch.
-        self.add_source_btn = ui.button('Add Radioactive Source Entry', icon='add', on_click=source_dialog.open).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
+        self.add_source_btn = ui.button('Add Radioactive Source Entry', icon='add', on_click=open_source_dialog).props('outline dense').classes('text-xs').style(f"color: {BRAND_COLORS['primary']};")
 
     def _build_shielding_modal(self):
         """Add-a-shielding-layer dialog. Unlike sources, there is no database
