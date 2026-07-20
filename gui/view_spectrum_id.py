@@ -1,6 +1,7 @@
 import os
 import json
 import math
+from datetime import datetime
 from nicegui import ui
 from config import BRAND_COLORS, get_rgba_fill, logger
 
@@ -313,8 +314,16 @@ class ControlPanelSidebar:
             self.bg_progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 rounded transition-all').props('color=amber')
             self.bg_progress_bar.set_visibility(False)
 
-            self.bg_btn = ui.button('RECORD BACKGROUND PROFILE', icon='security', on_click=self.trigger_bg)
+            self.bg_btn = ui.button('RECORD BACKGROUND SPECTRUM', icon='security', on_click=self.trigger_bg)
             self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
+
+            # Issue #45: lets the operator persist the latest recorded background
+            # spectrum to disk (data/spectra/background/), independent of any
+            # survey/batch activity. Hidden while a NEW background capture is in
+            # progress to avoid ambiguity about which background would be saved.
+            self._build_save_bg_modal()
+            self.save_bg_btn = ui.button('Store Background Spectrum', icon='save', on_click=self.open_save_bg_dialog)
+            self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
             
             with ui.row().classes('w-full gap-2 no-wrap pt-1'):
                 self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
@@ -327,8 +336,48 @@ class ControlPanelSidebar:
         self.service.use_log_scale = value
 
     def trigger_bg(self):
-        logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND PROFILE button. Duration: {self.bg_time_input.value}s")
+        logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
         self.service.start_background_recording(int(self.bg_time_input.value or 30))
+
+    def _build_save_bg_modal(self):
+        """Prompt dialog for issue #45, requirement 5: asks for a file name
+        (timestamp-prefixed suggestion) and two checkboxes for output format,
+        both checked by default, with at least one required."""
+        with ui.dialog() as self.save_bg_dialog, ui.card().classes('p-4 w-96 space-y-3'):
+            ui.label('Store Background Spectrum').classes('text-sm font-bold text-blue-600')
+
+            self.bg_filename_input = ui.input('File Name').props('dense outlined').classes('w-full text-xs')
+
+            ui.label('Output Format').classes('text-xs font-bold text-zinc-600 mt-1')
+            with ui.row().classes('w-full gap-4'):
+                self.bg_save_json_cb = ui.checkbox('JSON', value=True).classes('text-xs')
+                self.bg_save_spe_cb = ui.checkbox('SPE', value=True).classes('text-xs')
+
+            def commit_save():
+                if not self.bg_save_json_cb.value and not self.bg_save_spe_cb.value:
+                    ui.notify("Select at least one output format (JSON and/or SPE).", type="negative")
+                    return
+                ok, msg = self.service.save_background_spectrum(
+                    self.bg_filename_input.value,
+                    save_json=self.bg_save_json_cb.value,
+                    save_spe=self.bg_save_spe_cb.value
+                )
+                if ok:
+                    logger.warning(f"[USER_ACTION] Operator saved background spectrum: {msg}")
+                    ui.notify(msg, type="positive")
+                    self.save_bg_dialog.close()
+                else:
+                    ui.notify(msg, type="negative")
+
+            with ui.row().classes('w-full gap-2 pt-1'):
+                ui.button('Cancel', on_click=self.save_bg_dialog.close).props('dense outline').classes('flex-1')
+                ui.button('Save', icon='save', on_click=commit_save).props('dense color=primary').classes('flex-1')
+
+    def open_save_bg_dialog(self):
+        # Re-suggest a fresh timestamp prefix every time the dialog is opened,
+        # rather than leaving a stale one from a previous save attempt.
+        self.bg_filename_input.set_value(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_background")
+        self.save_bg_dialog.open()
 
     def trigger_play_stop_toggle(self):
         """Single control that starts a survey when idle, or halts it when running.
@@ -380,10 +429,10 @@ class ControlPanelSidebar:
             self.status_lbl.set_text(f"OP_STATE: {self.service.status_text.upper()}")
 
         if has_bg:
-            self.bg_status_lbl.set_text("BACKGROUND PROFILE: CALIBRATED (READY)")
+            self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: CALIBRATED (READY)")
             self.bg_status_lbl.style("color: #34D399;")
         else:
-            self.bg_status_lbl.set_text("BACKGROUND PROFILE: ABSENT (LOCKED)")
+            self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: ABSENT (LOCKED)")
             self.bg_status_lbl.style("color: #F87171;")
 
         if is_bg_running:
@@ -395,6 +444,12 @@ class ControlPanelSidebar:
             self.bg_progress_bar.set_value(0.0)
 
         self.bg_btn.set_visibility(is_idle and hw_ok)
+
+        # Issue #45: only offer saving when there's actually a background to
+        # save, and not while a new one is actively being captured (that would
+        # be ambiguous about which background gets written - the old committed
+        # one, or the in-progress capture).
+        self.save_bg_btn.set_visibility(has_bg and not is_bg_running)
 
         # Single toggle button: shows START when idle (ready to run), STOP while a
         # survey/background/batch run is in progress. No separate RESTART/CLEAR
