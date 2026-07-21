@@ -3,6 +3,7 @@ from config import BRAND_COLORS, logger
 from riid_service import RIIDCoreService
 from view_spectrum_id import SpectrumPlotContainer, ControlPanelSidebar
 from view_recording import SpectrumRecordingPanel
+from view_download import SpectraDownloadPanel
 from view_calibration import HardwareCalibrationPanel
 
 # Name of the ML model used for RIID. Available options in folder `ml_models/`
@@ -75,7 +76,8 @@ class RIIDSpectroscopyApp:
             with ui.card().classes('w-full p-0 rounded-lg border shadow-sm no-wrap overflow-hidden').style("background-color: #2D3748; border-color: #1A202C;"):
                 with ui.tabs().classes('w-full dense text-white').on('change', lambda e: logger.info(f"[UI_NAV] Tab shifted to: '{e.value}'")) as self.main_tabs:
                     self.tab_id = ui.tab('Spectrum ID', icon='analytics').classes('text-xs font-bold py-2')
-                    self.tab_recording = ui.tab('Spectrum Recording', icon='save_alt').classes('text-xs font-bold py-2')
+                    self.tab_recording = ui.tab('Spectrum Recording', icon='fiber_manual_record').classes('text-xs font-bold py-2')
+                    self.tab_download = ui.tab('Spectra Download', icon='download').classes('text-xs font-bold py-2')
                     self.tab_hardware = ui.tab('Hardware & Calibration', icon='tune').classes('text-xs font-bold py-2')
 
             # Dynamic Content Panel Frames Container
@@ -89,6 +91,9 @@ class RIIDSpectroscopyApp:
 
                 with ui.tab_panel(self.tab_recording).classes('p-0 m-0 bg-transparent'):
                     SpectrumRecordingPanel(backend_service)
+
+                with ui.tab_panel(self.tab_download).classes('p-0 m-0 bg-transparent'):
+                    SpectraDownloadPanel(backend_service)
 
                 with ui.tab_panel(self.tab_hardware).classes('p-0 m-0 bg-transparent'):
                     self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title, push_profile_callback=backend_service.push_active_profile_to_board)
