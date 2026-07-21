@@ -61,6 +61,13 @@ class RIIDCoreService:
         self.bg_accumulated_seconds = 0
         self.survey_elapsed_seconds = 0
         self.bg_progress = 0.0
+        # Hardware live/real time captured for the last background spectrum
+        # (either recorded fresh via _bg_recording_sequence, or loaded from a
+        # file via load_background_spectrum). Was previously live-time only -
+        # save_background_spectrum() used to duplicate this into the "real
+        # time" field of saved files instead of measuring it separately.
+        self.bg_hardware_live_time_ms = 0.0
+        self.bg_hardware_real_time_ms = 0.0
         
         self.current_isotope_id = "Standby"
         self.status_text = "System Initialized"
@@ -313,6 +320,12 @@ class RIIDCoreService:
                 # FIXED: Extract final absolute background hardware live-time directly from the MCA registers
                 final_bg_timers = self.daq_device.timers_read()
                 self.bg_hardware_live_time_ms = float(final_bg_timers.get("tmr_c", self.bg_target_time * 1000))
+                # FIXED: tmr_a (real time, per the timers_a_live_time=False config
+                # set at DPP programming time) was never being read here - every
+                # saved background previously had its "real time" field silently
+                # duplicated from live time instead of actually measured, which
+                # is only coincidentally correct at zero dead time.
+                self.bg_hardware_real_time_ms = float(final_bg_timers.get("tmr_a", self.bg_hardware_live_time_ms) or self.bg_hardware_live_time_ms)
                 self.bg_accumulated_seconds = int(self.bg_hardware_live_time_ms / 1000)
                 
                 self.bg_progress = 1.0
@@ -738,11 +751,12 @@ class RIIDCoreService:
             base_filepath = os.path.join(SPECTRA_BACKGROUND_DIR, safe_filename)
             
             live_time_s = float(self.bg_hardware_live_time_ms or 0.0) / 1000.0
-            # Background capture is a single manual collection window with only
-            # one hardware timer tracked for it (see _bg_recording_sequence) -
-            # live and real time are reported as equal, since no separate
-            # real-time register is read during that sequence.
-            real_time_s = live_time_s
+            # FIXED: previously duplicated from live_time_s (see
+            # _bg_recording_sequence / load_background_spectrum) - now both
+            # timers are captured/loaded independently, so this reflects the
+            # actual measured real time, which is expected to differ from live
+            # time whenever there's any dead time during the capture.
+            real_time_s = float(self.bg_hardware_real_time_ms or 0.0) / 1000.0
             
             metadata = self._build_spectrum_metadata(
                 num_channels=len(self.background_spectrum), run_idx=0,
@@ -830,9 +844,9 @@ class RIIDCoreService:
         ext = os.path.splitext(filepath)[1].lower()
         try:
             if ext == '.json':
-                spectrum, live_time_s, file_calib = self._parse_background_json(filepath)
+                spectrum, live_time_s, real_time_s, file_calib = self._parse_background_json(filepath)
             elif ext == '.spe':
-                spectrum, live_time_s, file_calib = self._parse_background_spe(filepath)
+                spectrum, live_time_s, real_time_s, file_calib = self._parse_background_spe(filepath)
             else:
                 return False, "Unsupported file type - choose a .json or .spe file."
         except Exception as e:
@@ -844,6 +858,7 @@ class RIIDCoreService:
         
         self.background_spectrum = spectrum
         self.bg_hardware_live_time_ms = live_time_s * 1000.0
+        self.bg_hardware_real_time_ms = real_time_s * 1000.0
         self.bg_accumulated_seconds = int(live_time_s)
         self.status_text = "Background Spectrum Ready"
         
@@ -868,38 +883,51 @@ class RIIDCoreService:
 
     def _parse_background_json(self, filepath: str) -> tuple:
         """Parses a background .json file (see save_background_spectrum) back
-        into (spectrum, live_time_s, calibration_tuple)."""
+        into (spectrum, live_time_s, real_time_s, calibration_tuple). Requires
+        both "Spectrum live time (s)" and "Spectrum real time (s)" to be
+        present - a file missing either is rejected rather than silently
+        backfilled, since a guessed value is worse than no value."""
         with open(filepath, "r", encoding="utf-8") as f:
             payload = json.load(f)
         spectrum = payload.get("data", [])
         metadata = payload.get("metadata", {})
-        live_time_s = float(metadata.get("Spectrum live time (s)", 0.0) or 0.0)
+        if "Spectrum live time (s)" not in metadata or "Spectrum real time (s)" not in metadata:
+            raise ValueError("File is missing live/real time metadata.")
+        live_time_s = float(metadata["Spectrum live time (s)"])
+        real_time_s = float(metadata["Spectrum real time (s)"])
         calib = (
             float(metadata.get("Energy calibration offset (keV)", 0.0)),
             float(metadata.get("Energy calibration linear (keV/ch)", 1.0)),
             float(metadata.get("Energy calibration quadratic (keV/ch2)", 0.0)),
         )
-        return spectrum, live_time_s, calib
+        return spectrum, live_time_s, real_time_s, calib
 
     def _parse_background_spe(self, filepath: str) -> tuple:
         """Parses a background .spe file (see _write_spe_file) back into
-        (spectrum, live_time_s, calibration_tuple). Reads $MEAS_TIM (live
-        time), $MCA_CAL (calibration coefficients), and $DATA (channel counts)
-        - the same sections _write_spe_file produces."""
+        (spectrum, live_time_s, real_time_s, calibration_tuple). Reads
+        $MEAS_TIM (live and real time), $MCA_CAL (calibration coefficients),
+        and $DATA (channel counts) - the same sections _write_spe_file
+        produces."""
         with open(filepath, "r", encoding="ascii", errors="replace") as f:
             lines = [ln.rstrip('\n').rstrip('\r') for ln in f.readlines()]
 
         spectrum = []
         live_time_s = 0.0
+        real_time_s = 0.0
         calib = (0.0, 1.0, 0.0)
 
         i = 0
         while i < len(lines):
             line = lines[i].strip()
             if line == "$MEAS_TIM:":
+                # $MEAS_TIM holds "<live_time_s> <real_time_s>" (see
+                # _write_spe_file). A file with only one value is rejected
+                # rather than backfilled.
                 parts = lines[i + 1].split()
-                if parts:
-                    live_time_s = float(parts[0])
+                if len(parts) < 2:
+                    raise ValueError("File is missing real time in $MEAS_TIM.")
+                live_time_s = float(parts[0])
+                real_time_s = float(parts[1])
                 i += 2
                 continue
             if line == "$MCA_CAL:":
@@ -920,7 +948,7 @@ class RIIDCoreService:
                 continue
             i += 1
 
-        return spectrum, live_time_s, calib
+        return spectrum, live_time_s, real_time_s, calib
 
     def list_spectra_files(self, category: str, ext_filter: str = 'ALL') -> list:
         """Lists files available for bulk download in a data/spectra/ category
