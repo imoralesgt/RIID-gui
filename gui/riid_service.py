@@ -2,6 +2,7 @@ import os
 import json
 import io
 import zipfile
+import tempfile
 import asyncio
 from datetime import datetime, timezone
 from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RIID_DIR
@@ -68,6 +69,12 @@ class RIIDCoreService:
         # time" field of saved files instead of measuring it separately.
         self.bg_hardware_live_time_ms = 0.0
         self.bg_hardware_real_time_ms = 0.0
+        # Same fix as above, applied to the continuous survey / RIID spectrum:
+        # previously only tmr_c (live time) was tracked during
+        # _continuous_survey_sequence, and build_riid_download_zip() duplicated
+        # it into the "real time" field instead of measuring it separately.
+        self.survey_hardware_live_time_ms = 0.0
+        self.survey_hardware_real_time_ms = 0.0
         
         self.current_isotope_id = "Standby"
         self.status_text = "System Initialized"
@@ -165,6 +172,7 @@ class RIIDCoreService:
             self.live_spectrum = []
             self.survey_elapsed_seconds = 0
             self.survey_hardware_live_time_ms = 0.0
+            self.survey_hardware_real_time_ms = 0.0
             self.survey_stopped_with_data = False
             return True
         except Exception as e:
@@ -442,6 +450,7 @@ class RIIDCoreService:
                     self.daq_device.data_acquisition_start()
                     self.survey_elapsed_seconds = 0
                     self.survey_hardware_live_time_ms = 0.0
+                    self.survey_hardware_real_time_ms = 0.0
                     self.live_spectrum = []
                     self.current_isotope_id = "Accumulating Counts..."
                     continue
@@ -450,6 +459,10 @@ class RIIDCoreService:
                 survey_timers = self.daq_device.timers_read()
                 self.survey_hardware_live_time_ms = float(survey_timers.get("tmr_c", 0))
                 self.survey_elapsed_seconds = int(self.survey_hardware_live_time_ms / 1000)
+                # FIXED: tmr_a (real time) was never read here - build_riid_download_zip()
+                # was duplicating live time into the "real time" field instead of
+                # measuring it separately, the same bug background had before its fix.
+                self.survey_hardware_real_time_ms = float(survey_timers.get("tmr_a", self.survey_hardware_live_time_ms) or self.survey_hardware_live_time_ms)
                 
                 hardware_spectrum_array = self.daq_device.read_spectrum()
                 if hardware_spectrum_array:
@@ -474,6 +487,7 @@ class RIIDCoreService:
                     baseline_spectrum = []
                     self.survey_elapsed_seconds = 0
                     self.survey_hardware_live_time_ms = 0.0
+                    self.survey_hardware_real_time_ms = 0.0
                     self.current_isotope_id = "Buffer Reset. Re-accumulating..."
                     continue
                 
@@ -789,6 +803,97 @@ class RIIDCoreService:
         except Exception as e:
             logger.error(f"[SERVICE] Failed to save background spectrum: {e}", exc_info=True)
             return False, f"Failed to save background spectrum: {e}"
+
+    def build_riid_download_zip(self) -> tuple:
+        """Issue #41: persists the current spectrum shown in the RIID view
+        (self.live_spectrum) to data/spectra/riid/ - genuinely written to disk,
+        named with the UTC timestamp (issue #64) of the moment this was called
+        - then bundles it together with the current background spectrum, both
+        in .json and .spe formats, into a single .zip for download.
+        
+        Only the RIID spectrum is persisted here. The background is NOT
+        re-written to data/spectra/background/ - that already has its own
+        explicit "Store Background Spectrum" action; re-saving it here on
+        every RIID download would silently pile up duplicate background files.
+        It's serialized in-memory (via a throwaway temp file, reusing the
+        already-tested _write_spe_file logic instead of duplicating it) purely
+        for inclusion in this zip.
+        
+        Returns:
+            (bool, str, bytes|None, str|None): (success, message, zip_bytes,
+            base_filename). base_filename is the UTC-timestamped name used for
+            both the persisted RIID files and the returned zip's contents, so
+            the caller can name the downloaded zip consistently with what was
+            actually saved to disk.
+        """
+        if not self.live_spectrum:
+            return False, "No spectrum currently shown in the RIID view.", None, None
+        if not self.background_spectrum:
+            return False, "No background spectrum available - record or load one first.", None, None
+        
+        time_now = datetime.now(timezone.utc)
+        # Same naming convention as the batch recording session
+        # ({timestamp}_{serial_number}_...) - just without the batch-specific
+        # prefix/run-index suffix, since a single RIID download has neither.
+        safe_filename = f"{time_now.strftime('%Y%m%d_%H%M%S')}_{self.system.serial_number}_riid"
+        
+        try:
+            os.makedirs(SPECTRA_RIID_DIR, exist_ok=True)
+            riid_base = os.path.join(SPECTRA_RIID_DIR, safe_filename)
+            
+            # FIXED: previously duplicated from live time (see
+            # _continuous_survey_sequence, which now reads tmr_a separately) -
+            # this reflects the actual measured real time.
+            riid_live_s = float(self.survey_hardware_live_time_ms or 0.0) / 1000.0
+            riid_real_s = float(self.survey_hardware_real_time_ms or 0.0) / 1000.0
+            riid_metadata = self._build_spectrum_metadata(
+                num_channels=len(self.live_spectrum), run_idx=0,
+                live_time_s=riid_live_s, real_time_s=riid_real_s
+            )
+            riid_spectrum_id = f"RIID_{safe_filename}"
+            
+            with open(f"{riid_base}.json", "w", encoding="utf-8") as jf:
+                json.dump({"id": riid_spectrum_id, "metadata": riid_metadata, "data": self.live_spectrum}, jf, indent=2)
+            self._write_spe_file(
+                filepath_base=riid_base, spectrum_id=riid_spectrum_id, spectrum=self.live_spectrum,
+                metadata=riid_metadata, live_time_s=riid_live_s, real_time_s=riid_real_s, time_now=time_now
+            )
+            logger.warning(f"[USER_ACTION] Operator downloaded RIID spectrum - saved to {riid_base}.json / .spe")
+            
+            # Serialize the background in-memory for the zip (see docstring - not
+            # persisted to data/spectra/background/ again here).
+            bg_live_s = float(self.bg_hardware_live_time_ms or 0.0) / 1000.0
+            bg_real_s = float(self.bg_hardware_real_time_ms or 0.0) / 1000.0
+            bg_metadata = self._build_spectrum_metadata(
+                num_channels=len(self.background_spectrum), run_idx=0,
+                live_time_s=bg_live_s, real_time_s=bg_real_s
+            )
+            bg_metadata["Material type"] = "background"
+            bg_metadata["Material form"] = "Environmental"
+            bg_spectrum_id = f"BG_{safe_filename}"
+            bg_json_bytes = json.dumps({"id": bg_spectrum_id, "metadata": bg_metadata, "data": self.background_spectrum}, indent=2).encode("utf-8")
+            
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_base = os.path.join(tmpdir, "bg_temp")
+                self._write_spe_file(
+                    filepath_base=tmp_base, spectrum_id=bg_spectrum_id, spectrum=self.background_spectrum,
+                    metadata=bg_metadata, live_time_s=bg_live_s, real_time_s=bg_real_s, time_now=time_now
+                )
+                with open(f"{tmp_base}.spe", "rb") as f:
+                    bg_spe_bytes = f.read()
+            
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.write(f"{riid_base}.json", arcname=f"{safe_filename}.json")
+                zf.write(f"{riid_base}.spe", arcname=f"{safe_filename}.spe")
+                zf.writestr(f"{safe_filename}_background.json", bg_json_bytes)
+                zf.writestr(f"{safe_filename}_background.spe", bg_spe_bytes)
+            buffer.seek(0)
+            
+            return True, f"Saved {safe_filename}.json and {safe_filename}.spe to data/spectra/riid/", buffer.getvalue(), safe_filename
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to build RIID download zip: {e}", exc_info=True)
+            return False, f"Failed to save/package spectrum: {e}", None, None
 
     def list_available_background_files(self) -> list:
         """Lists .json/.spe files available in the background spectra folder
@@ -1118,6 +1223,7 @@ class RIIDCoreService:
             self.live_spectrum = []
             self.survey_elapsed_seconds = 0
             self.survey_hardware_live_time_ms = 0.0
+            self.survey_hardware_real_time_ms = 0.0
             self.survey_stopped_with_data = False
             self.current_isotope_id = "Standby"
             self.status_text = "Spectrum Cleared - Ready"
