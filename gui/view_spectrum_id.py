@@ -361,6 +361,12 @@ class ControlPanelSidebar:
                 self.clear_btn = ui.button('CLEAR', icon='delete_sweep', on_click=self.trigger_clear)
                 self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
 
+            # Issue #41: bundles the last spectrum shown here with the current
+            # background into a downloadable .zip (both in .json and .spe).
+            # Visible only once a background has settled (see refresh_widget_states).
+            self.download_riid_btn = ui.button('Download Spectrum', icon='download', on_click=self.trigger_download_riid)
+            self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full mt-1 py-1.5 text-xs')
+
     def _toggle_plot_scale(self, value: bool):
         logger.info(f"[USER_ACTION] Operator modified counts scaling preference selection -> use_log_scale={value}")
         self.service.use_log_scale = value
@@ -451,6 +457,15 @@ class ControlPanelSidebar:
         logger.warning("[USER_ACTION] Operator clicked CLEAR button - wiping accumulated survey spectrum (background preserved).")
         self.service.clear_survey_data()
 
+    def trigger_download_riid(self):
+        logger.warning("[USER_ACTION] Operator clicked Download Spectrum button.")
+        ok, msg, zip_bytes, base_filename = self.service.build_riid_download_zip()
+        if not ok:
+            ui.notify(msg, type="negative")
+            return
+        ui.notify(msg, type="positive")
+        ui.download(zip_bytes, f"{base_filename}_bundle.zip", media_type='application/zip')
+
     def refresh_widget_states(self):
         """Monitors status variables and dynamically updates the panel metrics text strings."""
         is_idle = self.service.state == 'IDLE'
@@ -525,6 +540,13 @@ class ControlPanelSidebar:
         # survey (keeps this control's visibility consistent with the
         # load-background picker just above, and avoids saving mid-run).
         self.save_bg_btn.set_visibility(has_bg and is_idle)
+
+        # Issue #41: visible once the background has "settled" - it exists and
+        # isn't currently being (re)captured. Unlike save_bg_btn above, this
+        # stays visible during an active survey too, since downloading the
+        # in-progress/last-shown RIID spectrum together with the background is
+        # exactly the point of this button.
+        self.download_riid_btn.set_visibility(has_bg and not is_bg_running)
 
         # Single toggle button: shows START when idle (ready to run), STOP while a
         # survey/background/batch run is in progress. No separate RESTART/CLEAR
