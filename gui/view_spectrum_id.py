@@ -484,6 +484,24 @@ class ControlPanelSidebar:
             self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: ABSENT (LOCKED)")
             self.bg_status_lbl.style("color: #F87171;")
 
+        # Hide the entire panel during a live survey - simpler than showing the
+        # BG collection time as a disabled field. Visible in every other state
+        # (idle, an active BG capture, or batch recording).
+        self.bg_expansion.set_visibility(not is_survey_running)
+
+        # The Background Spectrum panel's action buttons (Record/Load/Store) are
+        # already hidden below whenever the app isn't idle. The BG Record Time
+        # field itself needs the same gate: it must stay visible whenever the
+        # panel itself is (so the operator can see the value that was actually
+        # used) but only be editable while idle - this includes during
+        # BG_RECORDING itself, where it must reflect the duration already
+        # committed to the running capture, not something that can be changed
+        # mid-capture.
+        if is_idle:
+            self.bg_time_input.enable()
+        else:
+            self.bg_time_input.disable()
+
         if is_bg_running:
             # Auto-open the collapsed panel so the operator sees progress without
             # needing to manually expand it mid-capture.
