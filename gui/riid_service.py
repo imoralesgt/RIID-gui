@@ -3,7 +3,7 @@ import json
 import io
 import zipfile
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RIID_DIR
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
@@ -582,7 +582,7 @@ class RIIDCoreService:
                 final_live_s = final_live_ms / 1000.0
                 final_real_s = final_real_ms / 1000.0
                 
-                time_now = datetime.now()
+                time_now = datetime.now(timezone.utc)
                 os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
                 file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
                 base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
@@ -649,7 +649,7 @@ class RIIDCoreService:
             "Energy calibration offset (keV)": prof.get("calib_a0", 0.0),
             "Energy calibration linear (keV/ch)": prof.get("calib_a1", 1.0),
             "Energy calibration quadratic (keV/ch2)": prof.get("calib_a2", 0.0),
-            "Spectrum acquisition date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Spectrum acquisition date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "Spectrum live time (s)": live_time_s,
             # issue #54, requirement 3: previously computed (final_real_s) but never
             # actually passed through into this dict, so it never reached the JSON.
@@ -769,7 +769,7 @@ class RIIDCoreService:
             metadata["Material form"] = "Environmental"
             
             spectrum_id = f"BG_{safe_filename}"
-            time_now = datetime.now()
+            time_now = datetime.now(timezone.utc)
             saved_files = []
             
             if save_json:
@@ -1020,6 +1020,49 @@ class RIIDCoreService:
             return None
         buffer.seek(0)
         return buffer.getvalue()
+
+    def delete_spectra_files(self, category: str, filenames: list) -> tuple:
+        """Permanently deletes the requested files from a data/spectra/
+        category folder, for the "Delete Selected" button on the Spectra
+        Download tab.
+        
+        Args:
+            category (str): One of 'background', 'batch', 'riid'.
+            filenames (list): Bare filenames to delete - basename-only, same
+                path-traversal guard used by build_spectra_zip.
+        
+        Returns:
+            (bool, str): (success, message). success is True if at least one
+            file was actually deleted; message summarizes the outcome,
+            including any files that could not be found or removed.
+        """
+        folder = self.SPECTRA_CATEGORY_DIRS.get(category)
+        if not folder or not filenames:
+            return False, "No files selected."
+        
+        deleted = []
+        failed = []
+        for name in filenames:
+            safe_name = os.path.basename(str(name))
+            filepath = os.path.join(folder, safe_name)
+            try:
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                    deleted.append(safe_name)
+                else:
+                    failed.append(safe_name)
+            except Exception as e:
+                logger.error(f"[SERVICE] Failed to delete spectra file {filepath}: {e}", exc_info=True)
+                failed.append(safe_name)
+        
+        if deleted:
+            logger.warning(f"[USER_ACTION] Operator permanently deleted {len(deleted)} spectra file(s) from category '{category}': {', '.join(deleted)}")
+        
+        if not deleted:
+            return False, "None of the selected files could be deleted."
+        if failed:
+            return True, f"Deleted {len(deleted)} file(s); {len(failed)} could not be found."
+        return True, f"Deleted {len(deleted)} file(s)."
 
     def stop_execution(self):
         """Halts the active acquisition loop without discarding the collected spectrum.
