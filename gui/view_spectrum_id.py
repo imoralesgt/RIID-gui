@@ -1,7 +1,7 @@
 import os
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from nicegui import ui
 from config import BRAND_COLORS, get_rgba_fill, logger
 
@@ -425,7 +425,7 @@ class ControlPanelSidebar:
     def open_save_bg_dialog(self):
         # Re-suggest a fresh timestamp prefix every time the dialog is opened,
         # rather than leaving a stale one from a previous save attempt.
-        self.bg_filename_input.set_value(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_background")
+        self.bg_filename_input.set_value(f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_background")
         self.save_bg_dialog.open()
 
     def trigger_play_stop_toggle(self):
