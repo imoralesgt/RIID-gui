@@ -1,8 +1,10 @@
 import os
 import json
+import io
+import zipfile
 import asyncio
 from datetime import datetime
-from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR
+from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RIID_DIR
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
@@ -13,6 +15,13 @@ class RIIDCoreService:
     # can sit alongside the future background/riid export folders without
     # everything being dumped into one directory).
     OUTPUT_FOLDER = SPECTRA_BATCH_DIR
+
+    # Issue #46: maps each bulk-download category to its data/spectra/ subfolder.
+    SPECTRA_CATEGORY_DIRS = {
+        'background': SPECTRA_BACKGROUND_DIR,
+        'batch': SPECTRA_BATCH_DIR,
+        'riid': SPECTRA_RIID_DIR,
+    }
 
     # Programmatic class constant for the unsigned 32-bit hardware register gating limit (2^32 - 1)
     MAX_32BIT_UINT = int(2**32 - 1)
@@ -912,6 +921,77 @@ class RIIDCoreService:
             i += 1
 
         return spectrum, live_time_s, calib
+
+    def list_spectra_files(self, category: str, ext_filter: str = 'ALL') -> list:
+        """Lists files available for bulk download in a data/spectra/ category
+        folder (issue #46).
+        
+        Args:
+            category (str): One of 'background', 'batch', 'riid'.
+            ext_filter (str): 'ALL' (.json and .spe), 'JSON', or 'SPE'
+                (case-insensitive).
+        
+        Returns:
+            list: Sorted bare filenames (no path) matching the filter. Empty
+            list if the category is unknown or the folder doesn't exist yet.
+        """
+        folder = self.SPECTRA_CATEGORY_DIRS.get(category)
+        if not folder or not os.path.isdir(folder):
+            return []
+        
+        ext_filter = (ext_filter or 'ALL').upper()
+        try:
+            files = os.listdir(folder)
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to list spectra files for category '{category}': {e}", exc_info=True)
+            return []
+        
+        result = []
+        for f in files:
+            lower = f.lower()
+            if ext_filter == 'JSON' and not lower.endswith('.json'):
+                continue
+            if ext_filter == 'SPE' and not lower.endswith('.spe'):
+                continue
+            if ext_filter == 'ALL' and not lower.endswith(('.json', '.spe')):
+                continue
+            result.append(f)
+        return sorted(result)
+
+    def build_spectra_zip(self, category: str, filenames: list):
+        """Bundles the requested files from a data/spectra/ category folder into
+        an in-memory .zip archive for bulk download (issue #46).
+        
+        Args:
+            category (str): One of 'background', 'batch', 'riid'.
+            filenames (list): Bare filenames to include (as returned by
+                list_spectra_files) - basename-only, to guard against any
+                path-traversal attempt regardless of what the caller passes in.
+        
+        Returns:
+            bytes | None: The zip archive's raw bytes, or None if the category
+            is unknown, no filenames were given, or none of them existed.
+        """
+        folder = self.SPECTRA_CATEGORY_DIRS.get(category)
+        if not folder or not filenames:
+            return None
+        
+        buffer = io.BytesIO()
+        added_any = False
+        with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+            for name in filenames:
+                safe_name = os.path.basename(str(name))
+                filepath = os.path.join(folder, safe_name)
+                if os.path.isfile(filepath):
+                    zf.write(filepath, arcname=safe_name)
+                    added_any = True
+                else:
+                    logger.warning(f"[SERVICE] Skipped missing file during zip export: {filepath}")
+        
+        if not added_any:
+            return None
+        buffer.seek(0)
+        return buffer.getvalue()
 
     def stop_execution(self):
         """Halts the active acquisition loop without discarding the collected spectrum.
