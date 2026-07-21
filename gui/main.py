@@ -57,46 +57,52 @@ class RIIDSpectroscopyApp:
         """Constructs the visual container tree utilizing official palettes."""
         ui.colors(primary=BRAND_COLORS['primary'], secondary=BRAND_COLORS['secondary'])
         
-        with ui.column().classes('w-full p-3 min-h-screen gap-3').style(f"background-color: {BRAND_COLORS['bg_workspace']}; font-family: 'Roboto', sans-serif;"):
-            
-            # Application Header Layout Block
-            with ui.row().classes('w-full justify-between items-center px-2 py-1 border-b').style("border-color: #D1D5DB;"):
-                ui.markdown(f"### **IAEA** RIID Laboratory Spectroscopy Station").classes('text-base font-bold text-slate-800 m-0 p-0')
-                self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
+        # Outer column spans the full viewport (so the workspace background color
+        # still reaches the browser edges), while the inner column caps and
+        # centers the actual content - otherwise every control stretches all the
+        # way to the window edges on large/maximized displays, which looks
+        # sparse and makes rows like the calibration panel unreasonably wide.
+        with ui.column().classes('w-full min-h-screen').style(f"background-color: {BRAND_COLORS['bg_workspace']}; font-family: 'Roboto', sans-serif;"):
+            with ui.column().classes('w-full max-w-[1600px] mx-auto p-3 gap-3'):
+                
+                # Application Header Layout Block
+                with ui.row().classes('w-full justify-between items-center px-2 py-1 border-b').style("border-color: #D1D5DB;"):
+                    ui.markdown(f"### **IAEA** RIID Laboratory Spectroscopy Station").classes('text-base font-bold text-slate-800 m-0 p-0')
+                    self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
 
-            # Global Interlock Connectivity Banner View Card
-            self.connection_alert_banner = ui.row().classes('w-full items-center justify-between px-4 py-2.5 rounded-lg border shadow-sm transition-all duration-300')
-            with self.connection_alert_banner:
-                with ui.row().classes('items-center gap-2'):
-                    self.banner_icon = ui.icon('report_problem', size='sm')
-                    self.banner_text = ui.label("Syncing hardware layers...")
-                self.banner_status_pill = ui.label("").classes('text-[10px] font-mono font-bold px-2 py-0.5 rounded')
+                # Global Interlock Connectivity Banner View Card
+                self.connection_alert_banner = ui.row().classes('w-full items-center justify-between px-4 py-2.5 rounded-lg border shadow-sm transition-all duration-300')
+                with self.connection_alert_banner:
+                    with ui.row().classes('items-center gap-2'):
+                        self.banner_icon = ui.icon('report_problem', size='sm')
+                        self.banner_text = ui.label("Syncing hardware layers...")
+                    self.banner_status_pill = ui.label("").classes('text-[10px] font-mono font-bold px-2 py-0.5 rounded')
 
-            # Center Card View Tab selectors layout element frame
-            with ui.card().classes('w-full p-0 rounded-lg border shadow-sm no-wrap overflow-hidden').style("background-color: #2D3748; border-color: #1A202C;"):
-                with ui.tabs().classes('w-full dense text-white').on('change', lambda e: logger.info(f"[UI_NAV] Tab shifted to: '{e.value}'")) as self.main_tabs:
-                    self.tab_id = ui.tab('Spectrum ID', icon='analytics').classes('text-xs font-bold py-2')
-                    self.tab_recording = ui.tab('Spectrum Recording', icon='fiber_manual_record').classes('text-xs font-bold py-2')
-                    self.tab_download = ui.tab('Spectra Download', icon='download').classes('text-xs font-bold py-2')
-                    self.tab_hardware = ui.tab('Hardware & Calibration', icon='tune').classes('text-xs font-bold py-2')
+                # Center Card View Tab selectors layout element frame
+                with ui.card().classes('w-full p-0 rounded-lg border shadow-sm no-wrap overflow-hidden').style("background-color: #2D3748; border-color: #1A202C;"):
+                    with ui.tabs().classes('w-full dense text-white').on('change', lambda e: logger.info(f"[UI_NAV] Tab shifted to: '{e.value}'")) as self.main_tabs:
+                        self.tab_id = ui.tab('Spectrum ID', icon='analytics').classes('text-xs font-bold py-2')
+                        self.tab_recording = ui.tab('Spectrum Recording', icon='fiber_manual_record').classes('text-xs font-bold py-2')
+                        self.tab_download = ui.tab('Spectra Download', icon='download').classes('text-xs font-bold py-2')
+                        self.tab_hardware = ui.tab('Hardware & Calibration', icon='tune').classes('text-xs font-bold py-2')
 
-            # Dynamic Content Panel Frames Container
-            with ui.tab_panels(self.main_tabs, value=self.tab_id).classes('w-full bg-transparent p-0 flex-1'):
-                with ui.tab_panel(self.tab_id).classes('p-0 m-0 bg-transparent'):
-                    with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
-                        with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 72%; border-color: #E2E8F0;'):
-                            self.plot_view = SpectrumPlotContainer(backend_service)
-                        with ui.card().classes('p-4 rounded-lg border shadow-md bg-zinc-900 gap-3 text-white').style('width: 28%; max-width: 340px;'):
-                            self.sidebar = ControlPanelSidebar(backend_service, self.plot_view)
+                # Dynamic Content Panel Frames Container
+                with ui.tab_panels(self.main_tabs, value=self.tab_id).classes('w-full bg-transparent p-0 flex-1'):
+                    with ui.tab_panel(self.tab_id).classes('p-0 m-0 bg-transparent'):
+                        with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
+                            with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 72%; border-color: #E2E8F0;'):
+                                self.plot_view = SpectrumPlotContainer(backend_service)
+                            with ui.card().classes('p-4 rounded-lg border shadow-md bg-zinc-900 gap-3 text-white').style('width: 28%; max-width: 340px;'):
+                                self.sidebar = ControlPanelSidebar(backend_service, self.plot_view)
 
-                with ui.tab_panel(self.tab_recording).classes('p-0 m-0 bg-transparent'):
-                    SpectrumRecordingPanel(backend_service)
+                    with ui.tab_panel(self.tab_recording).classes('p-0 m-0 bg-transparent'):
+                        SpectrumRecordingPanel(backend_service)
 
-                with ui.tab_panel(self.tab_download).classes('p-0 m-0 bg-transparent'):
-                    SpectraDownloadPanel(backend_service)
+                    with ui.tab_panel(self.tab_download).classes('p-0 m-0 bg-transparent'):
+                        SpectraDownloadPanel(backend_service)
 
-                with ui.tab_panel(self.tab_hardware).classes('p-0 m-0 bg-transparent'):
-                    self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title, push_profile_callback=backend_service.push_active_profile_to_board)
+                    with ui.tab_panel(self.tab_hardware).classes('p-0 m-0 bg-transparent'):
+                        self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title, push_profile_callback=backend_service.push_active_profile_to_board)
 
     def global_ui_sync_tick(self):
         """Drives all real-time component updates and handles dynamic layout changes."""
