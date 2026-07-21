@@ -767,6 +767,152 @@ class RIIDCoreService:
             logger.error(f"[SERVICE] Failed to save background spectrum: {e}", exc_info=True)
             return False, f"Failed to save background spectrum: {e}"
 
+    def list_available_background_files(self) -> list:
+        """Lists .json/.spe files available in the background spectra folder
+        (data/spectra/background/), for the "load pre-recorded background"
+        picker (issue #44). Returns bare filenames only (no path) - the file
+        system location stays known only to the service layer, matching how
+        save_background_spectrum() already keeps that internal."""
+        try:
+            if not os.path.isdir(SPECTRA_BACKGROUND_DIR):
+                return []
+            return sorted(
+                f for f in os.listdir(SPECTRA_BACKGROUND_DIR)
+                if f.lower().endswith(('.json', '.spe'))
+            )
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to list background files: {e}", exc_info=True)
+            return []
+
+    def load_background_spectrum(self, filename: str) -> tuple:
+        """Loads a pre-recorded background spectrum from a .json or .spe file
+        in data/spectra/background/ (issue #44), as an alternative to
+        recording a fresh one via start_background_recording(). The current
+        "record new" flow is untouched by this - this is purely an additional
+        path into the same self.background_spectrum/bg_hardware_live_time_ms
+        state.
+        
+        "Including calibration": the file's own energy calibration (offset/
+        linear/quadratic, as stored by _write_spe_file / _build_spectrum_metadata)
+        is read and compared against the system's CURRENT hardware calibration.
+        If they differ, the background is still loaded (the operator's call
+        whether that's acceptable), but the mismatch is flagged in the returned
+        message - since view_spectrum_id.py's _get_energy_axis() always renders
+        the background trace using the CURRENT hw_profile calibration, a
+        background recorded under different calibration settings would plot
+        with a shifted/incorrect energy axis. This method does NOT overwrite
+        the system's active calibration with the file's values - that would be
+        a much more invasive, separate decision that this feature does not ask for.
+        
+        Returns:
+            (bool, str): (success, message) - the message is either a summary
+            (potentially including a calibration-mismatch warning) or an error
+            description for the UI to display.
+        """
+        if self.state != 'IDLE':
+            return False, "Cannot load a background while a survey/recording is active."
+        if not filename:
+            return False, "Select a background file first."
+        
+        filepath = os.path.join(SPECTRA_BACKGROUND_DIR, os.path.basename(filename))
+        if not os.path.isfile(filepath):
+            return False, "File not found."
+        
+        ext = os.path.splitext(filepath)[1].lower()
+        try:
+            if ext == '.json':
+                spectrum, live_time_s, file_calib = self._parse_background_json(filepath)
+            elif ext == '.spe':
+                spectrum, live_time_s, file_calib = self._parse_background_spe(filepath)
+            else:
+                return False, "Unsupported file type - choose a .json or .spe file."
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to load background spectrum from {filepath}: {e}", exc_info=True)
+            return False, f"Failed to read file: {e}"
+        
+        if not spectrum:
+            return False, "File contains no spectrum data."
+        
+        self.background_spectrum = spectrum
+        self.bg_hardware_live_time_ms = live_time_s * 1000.0
+        self.bg_accumulated_seconds = int(live_time_s)
+        self.status_text = "Background Spectrum Ready"
+        
+        # Same downstream update a live BG recording already performs.
+        self.ml_inference.update_bkgnd_data(new_bkgnd_data=self.background_spectrum, new_bkgnd_live_time=self.bg_accumulated_seconds)
+        
+        logger.warning(f"[USER_ACTION] Operator loaded pre-recorded background spectrum: {filepath}")
+        
+        current_calib = (
+            float(self.system.hw_profile.get('calib_a0', 0.0)),
+            float(self.system.hw_profile.get('calib_a1', 1.0)),
+            float(self.system.hw_profile.get('calib_a2', 0.0)),
+        )
+        if file_calib and not all(abs(a - b) < 1e-6 for a, b in zip(file_calib, current_calib)):
+            return True, (
+                f"Loaded {os.path.basename(filepath)}, but its energy calibration "
+                f"(a0={file_calib[0]:.5f}, a1={file_calib[1]:.5f}, a2={file_calib[2]:.5f}) "
+                f"differs from the current hardware calibration - the background trace "
+                f"is plotted using the CURRENT calibration and may not align correctly."
+            )
+        return True, f"Loaded {os.path.basename(filepath)}"
+
+    def _parse_background_json(self, filepath: str) -> tuple:
+        """Parses a background .json file (see save_background_spectrum) back
+        into (spectrum, live_time_s, calibration_tuple)."""
+        with open(filepath, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        spectrum = payload.get("data", [])
+        metadata = payload.get("metadata", {})
+        live_time_s = float(metadata.get("Spectrum live time (s)", 0.0) or 0.0)
+        calib = (
+            float(metadata.get("Energy calibration offset (keV)", 0.0)),
+            float(metadata.get("Energy calibration linear (keV/ch)", 1.0)),
+            float(metadata.get("Energy calibration quadratic (keV/ch2)", 0.0)),
+        )
+        return spectrum, live_time_s, calib
+
+    def _parse_background_spe(self, filepath: str) -> tuple:
+        """Parses a background .spe file (see _write_spe_file) back into
+        (spectrum, live_time_s, calibration_tuple). Reads $MEAS_TIM (live
+        time), $MCA_CAL (calibration coefficients), and $DATA (channel counts)
+        - the same sections _write_spe_file produces."""
+        with open(filepath, "r", encoding="ascii", errors="replace") as f:
+            lines = [ln.rstrip('\n').rstrip('\r') for ln in f.readlines()]
+
+        spectrum = []
+        live_time_s = 0.0
+        calib = (0.0, 1.0, 0.0)
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line == "$MEAS_TIM:":
+                parts = lines[i + 1].split()
+                if parts:
+                    live_time_s = float(parts[0])
+                i += 2
+                continue
+            if line == "$MCA_CAL:":
+                # Line i+1 is the coefficient count, line i+2 is the values themselves.
+                coeff_values = [float(x) for x in lines[i + 2].split()]
+                if len(coeff_values) >= 3:
+                    calib = tuple(coeff_values[:3])
+                i += 3
+                continue
+            if line == "$DATA:":
+                # Line i+1 is the "start end" channel range; counts follow, one per
+                # line, until the next $-prefixed section marker.
+                i += 2
+                while i < len(lines) and not lines[i].startswith('$'):
+                    if lines[i].strip():
+                        spectrum.append(int(float(lines[i].strip())))
+                    i += 1
+                continue
+            i += 1
+
+        return spectrum, live_time_s, calib
+
     def stop_execution(self):
         """Halts the active acquisition loop without discarding the collected spectrum.
         The last spectrum trace and identification result are left exactly as they were
