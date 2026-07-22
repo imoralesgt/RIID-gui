@@ -442,8 +442,8 @@ class RIIDCoreService:
         Per the DPP4SiPM firmware docs, the $AQ start command (flags 0/1) unavoidably
         clears the BRAM spectrum memory as part of starting acquisition - there is no
         hardware "resume" flag. _continuous_survey_sequence() compensates for this in
-        software by carrying the previously accumulated spectrum forward as a baseline
-        and adding each new hardware reading on top of it. The live-time timer is NOT
+        software by carrying the previously accumulated spectrum forward and adding
+        each new hardware reading on top of it. The live-time timer is NOT
         reset by $AQ 1 (only an explicit $AQ 4 / timers_reset() does that, which ordinary
         START never calls), so it already persists correctly without any extra bookkeeping."""
         logger.info("[SERVICE] Operator initiated continuous radioisotope identification survey loop...")
@@ -462,12 +462,12 @@ class RIIDCoreService:
         IMPORTANT (per DPP4SiPM firmware docs, $AQ command): calling data_acquisition_start()
         (flag 0 or 1) "Cleans BRAM contents prior to starting" as an unconditional hardware
         side effect - this happens regardless of DPP reprogramming, and there is no flag to
-        resume without clearing. So the previously accumulated spectrum is captured here as
-        a baseline BEFORE starting, and added back on top of every subsequent hardware
+        resume without clearing. So the previously accumulated spectrum is captured here
+        BEFORE starting, and added back on top of every subsequent hardware
         reading, giving true continuity across STOP -> START despite the BRAM wipe.
         The on-board live-time timer (tmr_c) is untouched by $AQ 1 (only $AQ 4 /
         timers_reset() clears it, which an ordinary start never calls), so it already
-        reads the correct cumulative value with no baseline math needed."""
+        reads the correct cumulative value with no extra math needed."""
         logger.info("[SURVEY_RUN] Shared master API channel activated for live collection.")
         if self.daq_device is None:
             logger.error("[SURVEY_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
@@ -483,20 +483,36 @@ class RIIDCoreService:
             # auto-stall the instant Timer C reaches that leftover value, well
             # before the operator intends to stop. This only touches the Timers
             # DPP submodule (group 4) - it does not clear BRAM/spectrum, so it's
-            # safe to call unconditionally without disturbing the resumed baseline.
+            # safe to call unconditionally without disturbing the resumed accumulation.
             if not self._set_timers_preset(self.MAX_32BIT_UINT):
                 logger.warning("[SURVEY_RUN] Could not reset timer preset to unlimited - survey may stall early if a prior BG/batch preset is still active on the board.")
             
             # Snapshot whatever was accumulated before this start - $AQ is about to wipe
             # the physical BRAM out from under us regardless of what we do here.
-            baseline_spectrum = list(self.live_spectrum) if self.live_spectrum else []
+            previous_spectrum = list(self.live_spectrum) if self.live_spectrum else []
             
             self.daq_device.data_acquisition_start()
             
-            if baseline_spectrum:
-                logger.info(f"[SURVEY_RUN] Resuming on top of {sum(baseline_spectrum)} previously accumulated counts (BRAM cleared by $AQ; live-time timer persists in hardware).")
+            if previous_spectrum:
+                logger.info(f"[SURVEY_RUN] Resuming on top of {sum(previous_spectrum)} previously accumulated counts (BRAM cleared by $AQ; live-time timer persists in hardware).")
             else:
                 logger.info("[SURVEY_RUN] Resumed acquisition on existing programmed handle (no DPP resend).")
+            
+            # Re-sync the count-rate delta tracker to the ACTUAL state right now,
+            # rather than trusting whatever _prev_survey_counts/_prev_survey_elapsed_s
+            # were left at from before this start. This makes the first post-resume
+            # count-rate sample correct regardless of whether the hardware live-time
+            # timer actually persisted across the stop (the documented, expected
+            # behavior) or not - either way, the delta on the next poll is computed
+            # against a reference taken at THIS exact moment, so it can't come out
+            # as a stale/spurious spike or a corrupted jump on the count-rate plot.
+            try:
+                resync_timers = self.daq_device.timers_read()
+                self._prev_survey_elapsed_s = float(resync_timers.get("tmr_c", 0)) / 1000.0
+            except Exception as e:
+                logger.warning(f"[SURVEY_RUN] Could not re-sync count-rate timer reference on resume: {e}")
+                self._prev_survey_elapsed_s = 0.0
+            self._prev_survey_counts = sum(previous_spectrum) if previous_spectrum else 0
             
             while self.state == 'ACQUIRING_SURVEY':
                 await asyncio.sleep(1.0)
@@ -506,7 +522,7 @@ class RIIDCoreService:
                 if self.clear_requested:
                     logger.warning("[SURVEY_RUN] CLEAR requested mid-survey. Resetting on-board accumulation registers without stopping the survey or resending DPP parameters...")
                     self.clear_requested = False
-                    baseline_spectrum = []
+                    previous_spectrum = []
                     try: self.daq_device.data_acquisition_stop()
                     except: pass
                     self.daq_device.clear_spectrum()
@@ -540,8 +556,8 @@ class RIIDCoreService:
                 
                 hardware_spectrum_array = self.daq_device.read_spectrum()
                 if hardware_spectrum_array:
-                    if baseline_spectrum and len(baseline_spectrum) == len(hardware_spectrum_array):
-                        self.live_spectrum = [b + h for b, h in zip(baseline_spectrum, hardware_spectrum_array)]
+                    if previous_spectrum and len(previous_spectrum) == len(hardware_spectrum_array):
+                        self.live_spectrum = [b + h for b, h in zip(previous_spectrum, hardware_spectrum_array)]
                     else:
                         self.live_spectrum = hardware_spectrum_array
                     
@@ -572,7 +588,7 @@ class RIIDCoreService:
                     self.daq_device.timers_reset()
                     self.daq_device.data_acquisition_start()
                     
-                    baseline_spectrum = []
+                    previous_spectrum = []
                     # Bank the elapsed time so far into the offset BEFORE zeroing the
                     # hardware timer below - this is what keeps the count-rate
                     # plot's x-axis monotonically increasing across this automatic

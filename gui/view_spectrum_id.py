@@ -159,7 +159,7 @@ class SpectrumPlotContainer:
             plotly_traces, energy_axis, spectrum_data, current_state, use_log, peak_y_value, num_channels, cps_val_string
         )
         
-        # 4. FIXED LAYER STACK: Append the environmental background SECOND to layer it on top
+        # 4. FIXED LAYER STACK: Append the environmental background trace SECOND to layer it on top
         peak_y_value = self._append_background_trace(
             plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels
         )
@@ -332,7 +332,7 @@ class SpectrumPlotContainer:
         return [a0 + (a1 * ch) + (a2 * (ch ** 2)) for ch in range(num_channels)]
 
     def _append_background_trace(self, traces: list, x_axis: list, spectrum_data: list, bg_data: list, state: str, use_log: bool, num_channels: int) -> float:
-        """Calculates dynamic hardware-timed proportional background corrections and conditionally configures area shading layers."""
+        """Calculates dynamic hardware-timed proportional background-scaling corrections and conditionally configures area shading layers."""
         peak_y = 0.0
         target_raw_y = None
         trace_name = "Environmental Background"
@@ -342,7 +342,14 @@ class SpectrumPlotContainer:
             trace_name = "Recording Live Background..."
         elif bg_data and len(bg_data) == num_channels:
             bg_ms = float(getattr(self.service, 'bg_hardware_live_time_ms', 30000.0) or 30000.0)
-            if state == 'ACQUIRING_SURVEY':
+            # Normalize whenever there's a survey elapsed-time to normalize against -
+            # that includes the frozen "Last Survey (Stopped)" display, not just an
+            # actively-running one. Previously this only checked ACQUIRING_SURVEY,
+            # so pressing STOP silently fell back to the unscaled 300s-reference
+            # background, producing a wildly mismatched amplitude against the still-
+            # normalized-looking frozen survey trace right next to it.
+            show_frozen_survey = getattr(self.service, 'survey_stopped_with_data', False)
+            if state == 'ACQUIRING_SURVEY' or show_frozen_survey:
                 survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
                 time_scaling_factor = float(survey_ms / bg_ms)
                 trace_name = f"Background (Normalized to {survey_ms/1000:.1f}s)"
