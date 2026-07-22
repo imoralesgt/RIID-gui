@@ -46,6 +46,14 @@ class MlInference:
     __ML_MODELS_PATH = os.path.join(os.path.dirname(__file__), 'ml_models')
     __ML_MODEL_EXTENSION = '.tflite'
 
+    # Default multi-label classification threshold: a class is considered
+    # "detected" when its probability exceeds this value. This is set as a
+    # mutable INSTANCE attribute in __init__ (see also
+    # update_classification_threshold) rather than used directly as a class
+    # constant, since a future GUI control will let the operator adjust it at
+    # runtime - this constant is only the starting default.
+    DEFAULT_CLASSIFICATION_THRESHOLD = 0.5
+
     # Names of the valid ML models
     VALID_ML_MODELS = [
         'cnn_multilabel'
@@ -53,7 +61,7 @@ class MlInference:
     ]
 
     # Strings for the ML inference results
-    STR_NOT_ENOUGH_COUNTS = 'Not enough counts to perform RIID'
+    STR_NOT_ENOUGH_COUNTS = 'Not enough counts for RIID'
 
     def __init__(self, ml_model_name : str, min_counts : int = 25, bkgnd_data : list[int]  = [], bkgnd_live_time : float = 0.0):
         """
@@ -77,6 +85,11 @@ class MlInference:
         # Set the minimum counts to trigger the ML inference execution
         self.__min_counts = min_counts
         logger.info(f"Minimum expected counts on a single channel to trigger ML inference: {min_counts}")
+
+        # Public (not name-mangled) and mutable, unlike __min_counts above -
+        # callers read this directly (e.g. self.ml_inference.CLASSIFICATION_THRESHOLD)
+        # and a future GUI control will update it via update_classification_threshold().
+        self.CLASSIFICATION_THRESHOLD = self.DEFAULT_CLASSIFICATION_THRESHOLD
 
         # Initialize the background (if any)
         logger.info('Initializing background data...')
@@ -134,6 +147,23 @@ class MlInference:
         """
         
         self.__min_counts = new_min_counts
+
+    def update_classification_threshold(self, new_threshold : float):
+        """
+        Updates the multi-label classification threshold (self.CLASSIFICATION_THRESHOLD)
+        used by callers - e.g. the GUI's RIID results panel - to decide which
+        classes count as "detected". Does not affect inference_pipeline()'s own
+        output, which always returns the full, unfiltered per-class probability
+        breakdown regardless of this setting.
+
+        Args:
+            new_threshold (float): New threshold, clamped to [0.0, 1.0].
+        """
+        clamped = max(0.0, min(1.0, new_threshold))
+        if clamped != new_threshold:
+            logger.warning(f"Classification threshold {new_threshold} outside [0.0, 1.0] - clamped to {clamped}.")
+        self.CLASSIFICATION_THRESHOLD = clamped
+        logger.info(f"Classification threshold updated to {clamped}")
     
     def __ml_inference(self, preprocessed_spectrum : np.ndarray) -> list[float]:
         """
@@ -196,18 +226,20 @@ class MlInference:
             logger.error(f"Failed to load ML model: {e}. ML models are stored in {self.__ML_MODELS_PATH}.")
             return None
         
-    def __interpret_probabilities(self, probabilities : list[float], labels : list[str], threshold : float = 0.5) -> dict:
+    def __interpret_probabilities(self, probabilities : list[float], labels : list[str]) -> dict:
         """Shows in a readable way the probabilities of each class outcome from the ML model inference.
 
         Args:
             probabilities (list[float]): ML output probabilities for each class.
             labels (list[str]): List of class labels.
-            threshold (float, optional): Classification threshold. Defaults to 0.5.
 
         Returns:
-            dict: Dictionary with the class label as key and the probability as value
+            dict: Dictionary with EVERY class label as key and its probability
+            as value (0.0-1.0), in the same order as `labels` - not filtered by
+            CLASSIFICATION_THRESHOLD. Callers wanting only the "detected"
+            subset should filter this themselves using CLASSIFICATION_THRESHOLD.
         """
-        return {labels[i] : float(p) for i, p in enumerate(probabilities) if p > threshold}
+        return {labels[i] : float(p) for i, p in enumerate(probabilities)}
 
     def inference_pipeline(self,
                 spectrum_data : list[int],
@@ -225,7 +257,12 @@ class MlInference:
             spectrum_live_time (float): Live-time of the spectrum in seconds.
 
         Returns:
-            dict: ML inference result. Each detected isotope (probability > 50%) is returned along with the probability of occurrence.
+            dict | str: STR_NOT_ENOUGH_COUNTS if there are not enough counts to
+            perform inference. Otherwise, a dict with EVERY class label and its
+            probability of occurrence (0.0-1.0) - not just classes above
+            CLASSIFICATION_THRESHOLD. Callers should compare against
+            CLASSIFICATION_THRESHOLD themselves to decide which classes count
+            as positively detected (e.g. for a "Detected Isotopes" summary).
         """
         
         ml_preprocess = MLPreprocessing(min_counts = self.__min_counts)
