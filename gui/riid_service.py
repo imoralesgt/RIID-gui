@@ -4,6 +4,7 @@ import io
 import zipfile
 import tempfile
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RIID_DIR
 from core.daq_commands import DaqCommands
@@ -78,6 +79,38 @@ class RIIDCoreService:
         
         self.current_isotope_id = "Standby"
         self.status_text = "System Initialized"
+        
+        # Issue #37 (RIID results redesign): the model name for the "Model"
+        # metric card, and the FULL per-class probability breakdown from the
+        # most recent successful inference (all classes, not just ones above
+        # self.ml_inference.CLASSIFICATION_THRESHOLD) for the Class Probabilities
+        # bar chart. None whenever there's no result yet, or the last attempt
+        # returned a plain status string instead (e.g. "not enough counts").
+        self.ml_model_name = ml_model_name
+        self.last_ml_result = None
+        
+        # Issue #34: rolling window of (elapsed_seconds, instantaneous_cps, source)
+        # samples for the count-rate-over-time plot - distinct from the
+        # existing cumulative-average CPS shown in the spectrum plot's legend.
+        # source is 'survey' or 'bg', so the plot can color each segment to
+        # match the spectrum plot's own trace colors (blue/gray respectively).
+        # ~4 minutes at the survey loop's 1s poll interval.
+        self.cps_history = deque(maxlen=240)
+        self._prev_survey_counts = 0
+        self._prev_survey_elapsed_s = 0.0
+        # Same delta-tracking, for background recording's own CPS samples.
+        self._prev_bg_counts = 0
+        self._prev_bg_elapsed_s = 0.0
+        # The hardware live-time timer (survey_hardware_live_time_ms /
+        # bg's own tmr_c read) resets to 0 on every hysteresis-cycle buffer
+        # reset or new BG recording, but cps_history is intentionally
+        # preserved across those events - so each sample's x-value is offset by
+        # however much time was already "banked" from prior cycles, keeping the
+        # x-axis monotonically increasing instead of jumping backward (which
+        # Plotly would draw as a corrupted, overlapping line, since points are
+        # connected in array order, not sorted by x). Reset only by
+        # clear_cps_history() - the same explicit action that clears the history.
+        self._cps_history_time_offset_s = 0.0
         
         # Tracks whether the last survey was halted by the operator (STOP) while
         # holding valid spectrum data, so the plot can keep rendering it "frozen"
@@ -301,6 +334,11 @@ class RIIDCoreService:
         if not self._set_timers_preset(self.bg_target_time * 1000):
             logger.warning("[BACKGROUND_RUN] Hardware timer preset could not be set - falling back to software-only timing.")
         
+        # Defined before the try block (not alongside the other BG state resets
+        # below) so it's always bound even if open()/clear_spectrum()/etc. raise
+        # before the polling loop starts - finally references it unconditionally.
+        bg_live_time_s = 0.0
+        
         try:
             self.daq_device.open()
             self.daq_device.clear_spectrum()
@@ -309,6 +347,8 @@ class RIIDCoreService:
             
             self.elapsed_seconds = 0
             self.bg_progress = 0.0
+            self._prev_bg_counts = 0
+            self._prev_bg_elapsed_s = 0.0
             
             while self.elapsed_seconds < self.bg_target_time and self.state == 'BG_RECORDING':
                 await asyncio.sleep(1.0)
@@ -321,6 +361,20 @@ class RIIDCoreService:
                 self.live_spectrum = self.daq_device.read_spectrum()
                 self.bg_progress = min(float(self.elapsed_seconds / self.bg_target_time), 1.0) if self.bg_target_time > 0 else 1.0
                 self.status_text = f"Recording BG: {self.elapsed_seconds}/{self.bg_target_time}s"
+                
+                # Same instantaneous count-rate sampling as the survey loop, so the
+                # count-rate plot also shows activity during background recording -
+                # tagged 'bg' so the plot can color it gray, matching the spectrum
+                # plot's own Background trace color.
+                bg_live_time_s = float(hw_timers.get("tmr_c", 0)) / 1000.0
+                bg_total_counts = sum(self.live_spectrum) if self.live_spectrum else 0
+                bg_delta_counts = bg_total_counts - self._prev_bg_counts
+                bg_delta_time_s = bg_live_time_s - self._prev_bg_elapsed_s
+                if bg_delta_time_s > 0:
+                    bg_instantaneous_cps = max(bg_delta_counts, 0) / bg_delta_time_s
+                    self.cps_history.append((self._cps_history_time_offset_s + bg_live_time_s, bg_instantaneous_cps, 'bg'))
+                self._prev_bg_counts = bg_total_counts
+                self._prev_bg_elapsed_s = bg_live_time_s
                 
             if self.state == 'BG_RECORDING':
                 self.background_spectrum = self.daq_device.read_spectrum()
@@ -357,6 +411,16 @@ class RIIDCoreService:
             # would be left behind for the next survey START to mistake for a
             # prior survey accumulation to resume (the actual cause of the survey's
             # first frame showing the just-recorded background spectrum).
+            
+            # Bank this BG session's elapsed time into the count-rate offset (same
+            # mechanism as the hysteresis-cycle reset) - whatever comes next
+            # (another BG recording or a live survey) continues the count-rate
+            # plot's x-axis from here instead of restarting at 0 and corrupting
+            # the line (see clear_cps_history's docstring for why that matters).
+            self._cps_history_time_offset_s += bg_live_time_s
+            self._prev_bg_counts = 0
+            self._prev_bg_elapsed_s = 0.0
+            
             try:
                 self.daq_device.data_acquisition_stop()
                 self.daq_device.clear_spectrum()
@@ -452,6 +516,16 @@ class RIIDCoreService:
                     self.survey_hardware_live_time_ms = 0.0
                     self.survey_hardware_real_time_ms = 0.0
                     self.live_spectrum = []
+                    # Pressing CLEAR is an explicit "start fresh" action, so it
+                    # DOES reset the count-rate history too (only the automatic
+                    # hysteresis-cycle reset below leaves it alone). Without this,
+                    # old samples from before the clear (with elapsed-time x-values
+                    # up to whatever the prior session reached) stayed in the
+                    # history while new samples restarted from ~0 - Plotly draws
+                    # points in array order, not sorted by x, so that produced a
+                    # corrupted line jumping backward mid-plot.
+                    self.clear_cps_history()
+                    self.last_ml_result = None
                     self.current_isotope_id = "Accumulating Counts..."
                     continue
                 
@@ -474,6 +548,20 @@ class RIIDCoreService:
                 total_counts = sum(self.live_spectrum) if self.live_spectrum else 0
                 self.status_text = f"Survey Active ({self.survey_elapsed_seconds}s). Total Counts: {total_counts}"
                 
+                # Issue #34: instantaneous count rate = counts accumulated SINCE the
+                # last poll, divided by the time elapsed since that poll - distinct
+                # from the existing cumulative-average CPS shown in the plot legend,
+                # which smooths out over the whole session instead of showing recent
+                # activity.
+                live_time_s = self.survey_hardware_live_time_ms / 1000.0
+                delta_counts = total_counts - self._prev_survey_counts
+                delta_time_s = live_time_s - self._prev_survey_elapsed_s
+                if delta_time_s > 0:
+                    instantaneous_cps = max(delta_counts, 0) / delta_time_s
+                    self.cps_history.append((self._cps_history_time_offset_s + live_time_s, instantaneous_cps, 'survey'))
+                self._prev_survey_counts = total_counts
+                self._prev_survey_elapsed_s = live_time_s
+                
                 if total_counts >= self.max_counts_limit:
                     logger.warning(f"[SURVEY_RUN] Counts [{total_counts}] hit ceiling [{self.max_counts_limit}]. Resetting on-board buffer (no DPP resend)...")
                     
@@ -485,9 +573,17 @@ class RIIDCoreService:
                     self.daq_device.data_acquisition_start()
                     
                     baseline_spectrum = []
+                    # Bank the elapsed time so far into the offset BEFORE zeroing the
+                    # hardware timer below - this is what keeps the count-rate
+                    # plot's x-axis monotonically increasing across this automatic
+                    # reset (the history itself is intentionally preserved, per
+                    # request - only an explicit CLEAR button resets it).
+                    self._cps_history_time_offset_s += self.survey_hardware_live_time_ms / 1000.0
                     self.survey_elapsed_seconds = 0
                     self.survey_hardware_live_time_ms = 0.0
                     self.survey_hardware_real_time_ms = 0.0
+                    self._prev_survey_counts = 0
+                    self._prev_survey_elapsed_s = 0.0
                     self.current_isotope_id = "Buffer Reset. Re-accumulating..."
                     continue
                 
@@ -519,8 +615,52 @@ class RIIDCoreService:
 
 
     def _execute_ml_pipeline(self, raw_spectrum: list[int], live_time : int) -> str:
-        """Executes ML pipeline on live spectrum data."""
-        return self.ml_inference.inference_pipeline(spectrum_data=raw_spectrum, spectrum_live_time=live_time)
+        """Executes ML pipeline on live spectrum data.
+        
+        Issue #37: MlInference.inference_pipeline() now returns the FULL
+        per-class probability breakdown (all classes, not just detected ones) -
+        stored here in self.last_ml_result for the RIID results panel's Class
+        Probabilities bar chart / Detected Isotopes / Avg Confidence cards.
+        current_isotope_id remains a plain string for the simple status uses
+        elsewhere (BG recording, accumulating, standby, etc.)."""
+        result = self.ml_inference.inference_pipeline(spectrum_data=raw_spectrum, spectrum_live_time=live_time)
+        
+        if isinstance(result, dict):
+            self.last_ml_result = result
+            detected = {k: v for k, v in result.items() if v > self.ml_inference.CLASSIFICATION_THRESHOLD}
+            if detected:
+                return " + ".join(detected.keys())
+            return "No isotope exceeded the detection threshold"
+        
+        # Plain status string (e.g. MlInference.STR_NOT_ENOUGH_COUNTS) - no
+        # class breakdown available for this attempt.
+        self.last_ml_result = None
+        return result
+
+    def set_ml_classification_threshold(self, new_threshold: float):
+        """Passthrough to MlInference.update_classification_threshold() - the
+        entry point a future GUI control (operator-adjustable detection
+        threshold) should call, so the view layer doesn't need to reach into
+        self.ml_inference directly."""
+        self.ml_inference.update_classification_threshold(new_threshold)
+
+    def clear_cps_history(self):
+        """Clears the count-rate plot's rolling history (issue #34's plot).
+        Triggered by either its own dedicated Clear button OR the spectrum's
+        own CLEAR (both are explicit "start fresh" actions) - only the
+        automatic hysteresis-cycle buffer reset leaves the history alone, so
+        the rate profile stays continuous across THAT event specifically.
+        Also re-baselines both delta trackers (survey and background) and the
+        monotonic time offset so the next sample starts fresh rather than
+        computing a spurious delta, or plotting at a stale x-position, against
+        pre-clear state."""
+        self.cps_history.clear()
+        self._prev_survey_counts = 0
+        self._prev_survey_elapsed_s = 0.0
+        self._prev_bg_counts = 0
+        self._prev_bg_elapsed_s = 0.0
+        self._cps_history_time_offset_s = 0.0
+        logger.warning("[USER_ACTION] Operator cleared the count-rate plot history.")
 
 
     def start_batch_recording(self, target_time: int, total_runs: int, prefix: str):
@@ -1225,6 +1365,12 @@ class RIIDCoreService:
             self.survey_hardware_live_time_ms = 0.0
             self.survey_hardware_real_time_ms = 0.0
             self.survey_stopped_with_data = False
+            # Pressing CLEAR is an explicit "start fresh" action, so it DOES
+            # reset the count-rate history too (only the automatic
+            # hysteresis-cycle reset leaves it alone - see
+            # _continuous_survey_sequence's ceiling-reset branch).
+            self.clear_cps_history()
+            self.last_ml_result = None
             self.current_isotope_id = "Standby"
             self.status_text = "Spectrum Cleared - Ready"
 
