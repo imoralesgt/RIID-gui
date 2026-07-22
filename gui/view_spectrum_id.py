@@ -11,28 +11,92 @@ class SpectrumPlotContainer:
     # means autozoom happens only via the user's own action (double-click on the
     # plot, or the toolbar's Autoscale/Reset-axes button) - never automatically.
     PLOT_UIREVISION = 'riid_spectrum_plot'
+    # Same reasoning, applied to the new instantaneous count-rate plot (issue #34).
+    CPS_PLOT_UIREVISION = 'riid_cps_plot'
 
     def __init__(self, service):
         self.service = service
-        self.container = ui.column().classes('w-full items-center justify-center rounded-lg border p-2 bg-white')
-        self.riid_label = ui.label("ID: Standby").classes('text-2xl font-black uppercase tracking-wide px-3 py-2 rounded w-full border')
-        self.riid_label.style(f"color: {BRAND_COLORS['crimson_trace']}; background-color: #FEF2F2; border-color: #FEE2E2; border-left: 6px solid {BRAND_COLORS['crimson_trace']};")
         
-        # Tracks the last state actually rendered into the plot, so the heavy
-        # container.clear()+ui.plotly() redraw can be skipped when nothing is
-        # actively being recorded and nothing has actually changed (issue #43:
-        # the plot was blinking every second even while fully idle).
+        # ============ METRIC CARDS ROW (issue #37) ============
+        # Replaces the old single "ID: ..." banner - the same information
+        # (current status / detected isotopes) now lives in the first card,
+        # alongside confidence, live time, and the active model name.
+        with ui.row().classes('w-full gap-2'):
+            self.metric_isotopes_val = self._build_metric_card('Detected Isotopes')
+            self.metric_confidence_val = self._build_metric_card('Avg Confidence')
+            self.metric_livetime_val = self._build_metric_card('Live Time')
+            self.metric_model_val = self._build_metric_card('ML Model')
+        self.metric_model_val.set_text(getattr(self.service, 'ml_model_name', 'UNKNOWN'))
+        
+        # ============ MAIN CONTENT: spectrum (left) + RIID results (right) ============
+        # 65/35 split (was 50/50) - the spectrum reads better with more room,
+        # while the results panel still has enough width for the class
+        # probability bars and count-rate plot.
+        with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2'):
+            self.container = ui.column().classes('items-center justify-center rounded-lg border p-2 bg-white').style('width: 65%;')
+            
+            with ui.column().classes('gap-3').style('width: 35%;'):
+                with ui.column().classes('w-full p-3 rounded-lg border bg-white gap-2').style('border-color: #E2E8F0;'):
+                    ui.label('Class Probabilities (Multi-Label)').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                    self.class_prob_container = ui.column().classes('w-full gap-2')
+                
+                # Issue #34: count-rate over time (distinct from the cumulative-average
+                # CPS already shown in the spectrum plot's legend). Has its own Clear
+                # button since it must NOT be wiped by the hysteresis cycle reset -
+                # only an explicit operator action should clear this history.
+                with ui.column().classes('w-full p-3 rounded-lg border bg-white gap-2 flex-1').style('border-color: #E2E8F0;'):
+                    with ui.row().classes('w-full justify-between items-center'):
+                        ui.label('Count-rate').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                        ui.button('Clear', icon='delete_sweep', on_click=self.trigger_clear_cps_history) \
+                            .props('dense flat size=sm').classes('text-[10px] text-zinc-500')
+                    self.cps_plot_container = ui.column().classes('w-full')
+        
+        self._build_class_probability_bars()
+        
+        # Tracks the last state actually rendered into the spectrum plot, so the
+        # heavy container.clear()+ui.plotly() redraw can be skipped when nothing is
+        # actively being recorded and nothing has actually changed (issue #43).
         self._last_render_signature = None
-        
-        # The live ui.plotly widget, kept alive and updated in place (rather than
-        # torn down and recreated) across data refreshes so the browser-side plot
-        # instance - and therefore the user's zoom/pan state - persists. Only reset
-        # to None when we fall back to the standby splash card (nothing to plot).
+        # The live spectrum ui.plotly widget, kept alive and updated in place
+        # (rather than torn down and recreated) so the browser-side plot instance -
+        # and the user's zoom/pan - persists. Reset to None only when falling back
+        # to the standby splash (nothing to plot).
         self._plot_widget = None
+        
+        # Same pattern, for the new count-rate plot.
+        self._last_cps_render_signature = None
+        self._cps_plot_widget = None
+
+    def _build_metric_card(self, label: str) -> ui.label:
+        """Builds one of the top summary cards (issue #37) and returns its
+        value label so callers can update it directly."""
+        with ui.column().classes('flex-1 items-center justify-center p-3 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0;'):
+            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151;')
+            ui.label(label.upper()).classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
+        return value_lbl
+
+    def _build_class_probability_bars(self):
+        """Pre-builds one row (name + percentage + progress bar) per class the
+        active ML model can output, in the model's own label order - matches
+        the screenshot's Background/Co-60/Cs-137/Eu-152/U-nat ordering for the
+        multi-label model. Built once; update_ui_elements only updates values
+        from here on, so this never needs a blink-prone teardown/rebuild."""
+        self.class_prob_bars = {}
+        labels = list(self.service.ml_inference.get_isotope_labels().values())
+        with self.class_prob_container:
+            for label in labels:
+                with ui.column().classes('w-full gap-0'):
+                    with ui.row().classes('w-full justify-between items-center no-wrap'):
+                        ui.label(label).classes('text-[11px] font-medium text-zinc-700')
+                        val_lbl = ui.label('0.0%').classes('text-[11px] font-bold text-zinc-500')
+                    bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-2 rounded').props('color=grey-4')
+                self.class_prob_bars[label] = (val_lbl, bar)
 
     def update_ui_elements(self):
         """Master orchestrator driving dynamic component layers stacking order and layout configurations."""
-        self.riid_label.set_text(f"ID: {self.service.current_isotope_id}")
+        self._update_metric_cards()
+        self._update_class_probability_bars()
+        self._update_count_rate_plot()
         
         spectrum_data = self.service.live_spectrum
         bg_data = self.service.background_spectrum
@@ -95,7 +159,7 @@ class SpectrumPlotContainer:
             plotly_traces, energy_axis, spectrum_data, current_state, use_log, peak_y_value, num_channels, cps_val_string
         )
         
-        # 4. FIXED LAYER STACK: Append the environmental background baseline SECOND to layer it on top
+        # 4. FIXED LAYER STACK: Append the environmental background SECOND to layer it on top
         peak_y_value = self._append_background_trace(
             plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels
         )
@@ -106,9 +170,9 @@ class SpectrumPlotContainer:
         fig = {
             'data': plotly_traces,
             'layout': {
-                'xaxis': {'title': 'Energy (keV)', 'titlefont': {'size': 10, 'bold': True}, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
+                'xaxis': {'title': {'text': 'Energy (keV)', 'font': {'size': 10}}, 'automargin': True, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
                 'yaxis': y_axis_layout,
-                'margin': {'l': 45, 'r': 20, 't': 15, 'b': 35}, 
+                'margin': {'l': 55, 'r': 20, 't': 15, 'b': 45}, 
                 'plot_bgcolor': BRAND_COLORS['plot_bg'], 
                 'paper_bgcolor': BRAND_COLORS['plot_paper'], 
                 'showlegend': True,
@@ -132,6 +196,132 @@ class SpectrumPlotContainer:
             self._plot_widget.figure = fig
             self._plot_widget.update()
 
+    def _update_metric_cards(self):
+        """Drives the four top summary cards from the service's latest state.
+        "Detected Isotopes"/"Avg Confidence" come from self.service.last_ml_result
+        (the FULL per-class breakdown, issue #37) when available; otherwise they
+        fall back to the plain current_isotope_id status string (Standby,
+        Accumulating, Recording Background, etc.) - the same text the old "ID: ..."
+        banner used to show."""
+        result = getattr(self.service, 'last_ml_result', None)
+        threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
+        
+        if result:
+            # "Detected Isotopes" only lists actual isotopes, not the Background class.
+            detected = {k: v for k, v in result.items() if k != 'Background' and v > threshold}
+            if detected:
+                self.metric_isotopes_val.set_text(' + '.join(detected.keys()))
+                self.metric_isotopes_val.style('color: ' + BRAND_COLORS['crimson_trace'] + ';')
+                avg_conf = sum(detected.values()) / len(detected)
+                self.metric_confidence_val.set_text(f"{avg_conf * 100:.1f}%")
+                self.metric_confidence_val.style('color: #059669;')
+            else:
+                bg_conf = result.get('Background', 0.0)
+                self.metric_isotopes_val.set_text('Background')
+                self.metric_isotopes_val.style('color: #374151;')
+                self.metric_confidence_val.set_text(f"{bg_conf * 100:.1f}%")
+                self.metric_confidence_val.style('color: #374151;')
+        else:
+            self.metric_isotopes_val.set_text(self.service.current_isotope_id)
+            self.metric_isotopes_val.style('color: #374151;')
+            self.metric_confidence_val.set_text('--')
+            self.metric_confidence_val.style('color: #374151;')
+        
+        elapsed = getattr(self.service, 'survey_elapsed_seconds', 0)
+        self.metric_livetime_val.set_text(f"{elapsed} s")
+
+    def _update_class_probability_bars(self):
+        """Updates the pre-built per-class bars from the latest full breakdown
+        (issue #37). Bars for classes not in the current result (i.e. no
+        inference has run yet, or the last attempt returned a plain status
+        string) fall back to 0%."""
+        result = getattr(self.service, 'last_ml_result', None) or {}
+        threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
+        for label, (val_lbl, bar) in self.class_prob_bars.items():
+            prob = float(result.get(label, 0.0) or 0.0)
+            val_lbl.set_text(f"{prob * 100:.1f}%")
+            bar.set_value(prob)
+            bar.props(f"color={'red-6' if prob > threshold else 'grey-4'}")
+
+    def _update_count_rate_plot(self):
+        """Issue #34: renders the instantaneous count-rate-over-time plot from
+        self.service.cps_history (a rolling window of (elapsed_s, cps, source)
+        samples appended by both the survey AND background-recording polling
+        loops). Samples are split by their source tag into two traces, colored
+        to match the spectrum plot's own trace colors: blue (primary) for
+        survey activity, gray (accent) for background recording activity -
+        so the count-rate plot visually tracks whichever is currently running.
+        Same persistent-widget/uirevision pattern as the main spectrum plot, so
+        the operator's zoom/pan on this plot survives incoming data too."""
+        history = list(getattr(self.service, 'cps_history', []) or [])
+        current_state = self.service.state
+        is_actively_sampling = current_state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+        
+        render_signature = (len(history), history[-1] if history else None, current_state)
+        if not is_actively_sampling and render_signature == self._last_cps_render_signature:
+            return
+        self._last_cps_render_signature = render_signature
+        
+        if not history:
+            self.cps_plot_container.clear()
+            self._cps_plot_widget = None
+            with self.cps_plot_container, ui.column().classes('w-full h-[140px] items-center justify-center text-zinc-400 gap-1'):
+                ui.icon('show_chart', size='sm').style(f"color: {BRAND_COLORS['accent']};")
+                ui.label('No data yet').classes('text-[11px] font-bold text-zinc-500')
+            return
+        
+        # Split by source, preserving order (older entries are 2-tuples from
+        # before this split existed - treated as 'survey' for backward compat).
+        survey_x, survey_y, bg_x, bg_y = [], [], [], []
+        for sample in history:
+            x, y = sample[0], sample[1]
+            source = sample[2] if len(sample) > 2 else 'survey'
+            if source == 'bg':
+                bg_x.append(x); bg_y.append(y)
+            else:
+                survey_x.append(x); survey_y.append(y)
+        
+        traces = []
+        if bg_x:
+            traces.append({
+                'x': bg_x, 'y': bg_y, 'type': 'scatter', 'mode': 'lines', 'name': 'Background',
+                'line': {'color': BRAND_COLORS['accent'], 'width': 1.5},
+                'fill': 'tozeroy', 'fillcolor': get_rgba_fill('accent'),
+            })
+        if survey_x:
+            traces.append({
+                'x': survey_x, 'y': survey_y, 'type': 'scatter', 'mode': 'lines', 'name': 'Survey',
+                'line': {'color': BRAND_COLORS['primary'], 'width': 1.5},
+                'fill': 'tozeroy', 'fillcolor': get_rgba_fill('primary'),
+            })
+        
+        fig = {
+            'data': traces,
+            'layout': {
+                'xaxis': {'title': {'text': 'Time (s)', 'font': {'size': 10}}, 'automargin': True, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
+                'yaxis': {'title': {'text': 'Count-rate (cps)', 'font': {'size': 10}}, 'automargin': True, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True, 'rangemode': 'tozero'},
+                'margin': {'l': 50, 'r': 10, 't': 10, 'b': 40},
+                'plot_bgcolor': BRAND_COLORS['plot_bg'], 'paper_bgcolor': BRAND_COLORS['plot_paper'],
+                'showlegend': False,
+                'uirevision': self.CPS_PLOT_UIREVISION,
+            }
+        }
+        
+        if self._cps_plot_widget is None:
+            self.cps_plot_container.clear()
+            with self.cps_plot_container:
+                self._cps_plot_widget = ui.plotly(fig).classes('w-full h-[140px]')
+        else:
+            self._cps_plot_widget.figure = fig
+            self._cps_plot_widget.update()
+
+    def trigger_clear_cps_history(self):
+        logger.warning("[USER_ACTION] Operator clicked Clear button on the Count-rate plot.")
+        self.service.clear_cps_history()
+        # Force an immediate redraw rather than waiting for the next tick, so the
+        # plot visibly empties out right away.
+        self._last_cps_render_signature = None
+        self._update_count_rate_plot()
 
     def _get_energy_axis(self, num_channels: int) -> list:
         """Parses active hardware slope parameters and compiles keV coordinates."""
@@ -142,10 +332,10 @@ class SpectrumPlotContainer:
         return [a0 + (a1 * ch) + (a2 * (ch ** 2)) for ch in range(num_channels)]
 
     def _append_background_trace(self, traces: list, x_axis: list, spectrum_data: list, bg_data: list, state: str, use_log: bool, num_channels: int) -> float:
-        """Calculates dynamic hardware-timed proportional baseline corrections and conditionally configures area shading layers."""
+        """Calculates dynamic hardware-timed proportional background corrections and conditionally configures area shading layers."""
         peak_y = 0.0
         target_raw_y = None
-        trace_name = "Environmental Background Baseline"
+        trace_name = "Environmental Background"
         
         if state == 'BG_RECORDING' and spectrum_data:
             target_raw_y = spectrum_data
@@ -155,10 +345,10 @@ class SpectrumPlotContainer:
             if state == 'ACQUIRING_SURVEY':
                 survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
                 time_scaling_factor = float(survey_ms / bg_ms)
-                trace_name = f"Background Baseline (Normalized to {survey_ms/1000:.1f}s)"
+                trace_name = f"Background (Normalized to {survey_ms/1000:.1f}s)"
             else:
                 time_scaling_factor = 1.0
-                trace_name = f"Background Baseline ({bg_ms/1000:.1f}s Reference)"
+                trace_name = f"Background ({bg_ms/1000:.1f}s Reference)"
                 
             raw_scaled_bg = [float(counts * time_scaling_factor) for counts in bg_data]
             target_raw_y = raw_scaled_bg
@@ -254,9 +444,9 @@ class SpectrumPlotContainer:
             # FIXED: Bypasses manual calculation limits. Leverages native Plotly autorange tracking 
             # while binding strict formatting rules to force base-10 power of ten index grid lines.
             return {
-                'title': axis_title_string,
+                'title': {'text': axis_title_string, 'font': {'size': 10}},
+                'automargin': True,
                 'type': 'log',
-                'titlefont': {'size': 10, 'bold': True},
                 'tickfont': {'size': 8},
                 'gridcolor': BRAND_COLORS['plot_grid'],
                 
@@ -275,9 +465,9 @@ class SpectrumPlotContainer:
         else:
             # Linear scale continue to run on native automatic scaling properties
             return {
-                'title': axis_title_string,
+                'title': {'text': axis_title_string, 'font': {'size': 10}},
+                'automargin': True,
                 'type': 'linear',
-                'titlefont': {'size': 10, 'bold': True},
                 'tickfont': {'size': 8},
                 'gridcolor': BRAND_COLORS['plot_grid'],
                 'autorange': True
