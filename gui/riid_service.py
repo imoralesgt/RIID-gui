@@ -271,12 +271,6 @@ class RIIDCoreService:
         logger.info("[HEARTBEAT] Asynchronous non-invasive serial monitor online.")
         while True:
             if self.state == 'IDLE':
-                target_port = self.system.hw_profile.get("port_name")
-                if target_port is None and self.system.serial_number != "UNKNOWN":
-                    if os.path.exists("/dev/ttyUSB1"): target_port = "/dev/ttyUSB1"
-                    elif os.path.exists("/dev/ttyUSB0"): target_port = "/dev/ttyUSB0"
-                    if target_port: self.system.hw_profile["port_name"] = target_port
-
                 if not self.is_hardware_available:
                     try:
                         logger.warning("[HEARTBEAT] Hardware link missing. Running re-probe discovery sequence...")
@@ -291,13 +285,12 @@ class RIIDCoreService:
                         self.is_hardware_available = False
                         self.status_text = "Hardware Disconnected"
                 else:
-                    port_to_check = target_port if target_port else "/dev/ttyUSB1"
-                    if os.path.exists(port_to_check):
+                    if DaqCommands.is_device_present():
                         self.is_hardware_available = True
                         if "Disconnected" in self.status_text:
                             self.status_text = "Hardware Connected & Ready"
                     else:
-                        logger.error(f"[HEARTBEAT] Physical device disconnected from port location: {port_to_check}")
+                        logger.error("[HEARTBEAT] Physical device disconnected - autodiscovery no longer finds a matching DAQ board.")
                         self.is_hardware_available = False
                         self.status_text = "Hardware Disconnected"
                         self.system.serial_number = "UNKNOWN"
