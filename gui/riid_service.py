@@ -10,6 +10,7 @@ from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RI
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
+from ml_preprocessing import MLPreprocessing
 
 class RIIDCoreService:
     # Centralized folder destination constant (issue #57: was the flat DATA_DIR
@@ -57,6 +58,12 @@ class RIIDCoreService:
         
         # Trigger thresholds for automated identification pipelines
         self.max_counts_limit = self.DEFAULT_MAX_COUNTS_LIMIT
+        
+        # Spectrum plot display preference - was previously only created lazily
+        # by the view layer (ControlPanelSidebar's __init__), which broke once
+        # SpectrumPlotContainer (constructed first, in main.py) started reading
+        # it directly for its own relocated log-scale checkbox (issue #39).
+        self.use_log_scale = False
         
         # Configuration presets for structural automated multi-run recordings
         self.batch_target_time = self.DEFAULT_BATCH_TARGET_TIME_S
@@ -702,6 +709,48 @@ class RIIDCoreService:
         except Exception as e:
             logger.error(f"[SERVICE] Failed to switch ML model to '{model_name}': {e}", exc_info=True)
             return False, f"Failed to switch model: {e}"
+
+    def compute_background_subtracted_spectrum(self, spectrum_data: list, spectrum_live_time_s: float, bg_data: list, bg_live_time_s: float) -> list:
+        """Issue #39 ("Spectrum - Background" visualization template): reuses
+        MLPreprocessing.subtract_background() - the exact same background
+        subtraction step MlInference.inference_pipeline() runs before feeding
+        a spectrum to the model - instead of maintaining a second, separate
+        subtraction implementation in the view layer. This means the
+        visualization is a true representation of what the classifier itself
+        reasons over, and can't silently drift out of sync with the ML
+        pipeline's own subtraction behavior over time.
+        
+        A fresh MLPreprocessing instance is constructed per call - this is
+        cheap (it just stores a few int/float config values, no model loading
+        or I/O), unlike constructing a fresh MlInference.
+        
+        min_counts=0 (not the ML pipeline's own value of 20) - this call is
+        purely for display. The spectrum must stay visible even when the ML
+        pipeline itself declines to run inference due to insufficient counts;
+        min_counts here only controls a log warning inside subtract_background
+        about the subtraction being statistically unreliable, and that warning
+        shouldn't fire just because the operator is looking at a low-count
+        spectrum that isn't being classified yet.
+        
+        Args:
+            spectrum_data (list): Raw spectrum counts.
+            spectrum_live_time_s (float): Spectrum's live time, in SECONDS
+                (subtract_background expects seconds, unlike the hardware
+                timers elsewhere in this file which report milliseconds).
+            bg_data (list): Raw background counts.
+            bg_live_time_s (float): Background's live time, in SECONDS.
+        
+        Returns:
+            list: Background-subtracted spectrum, negative values clipped to
+            0. If no usable background is available, subtract_background
+            itself falls back to returning the raw spectrum unchanged.
+        """
+        preprocessor = MLPreprocessing(min_counts=0)
+        result = preprocessor.subtract_background(
+            spectrum_data=spectrum_data, spectrum_live_time=spectrum_live_time_s,
+            bkgnd_data=bg_data or [], bkgnd_live_time=bg_live_time_s
+        )
+        return result.tolist()
 
     def clear_cps_history(self):
         """Clears the count-rate plot's rolling history (issue #34's plot).
