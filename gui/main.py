@@ -90,15 +90,30 @@ class RIIDSpectroscopyApp:
                     with ui.row().classes('items-center gap-2'):
                         ui.html('<img src="/iaea_logo.png" style="height: 60px; width: auto; display: block;" alt="IAEA logo" />')
                         ui.markdown("# RIID and spectroscopy station").classes('text-base font-bold text-slate-800 m-0 p-0')
-                    self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
-
-                # Global Interlock Connectivity Banner View Card
-                self.connection_alert_banner = ui.row().classes('w-full items-center justify-between px-4 py-2.5 rounded-lg border shadow-sm transition-all duration-300')
-                with self.connection_alert_banner:
-                    with ui.row().classes('items-center gap-2'):
-                        self.banner_icon = ui.icon('report_problem', size='sm')
-                        self.banner_text = ui.label("Syncing hardware layers...")
-                    self.banner_status_pill = ui.label("").classes('text-[10px] font-mono font-bold px-2 py-0.5 rounded')
+                    
+                    # Station ID + connectivity status, stacked into two compact
+                    # rows on the right (was: Station ID here, then a separate
+                    # full-page-width status stripe below the whole header) - now
+                    # both rows together are sized to roughly match the logo's
+                    # height. The ONLINE/OFFLINE status text (with its color) is
+                    # embedded directly in the Station ID box itself, rather than
+                    # being a separate adjacent pill.
+                    with ui.column().classes('items-end gap-1'):
+                        with ui.row().classes('items-center gap-0 px-3 py-1 rounded bg-white shadow-sm border border-blue-200 no-wrap'):
+                            self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold text-blue-700')
+                            ui.label('|').classes('text-xs font-mono text-zinc-300 mx-2')
+                            self.banner_status_pill = ui.label("").classes('text-xs font-mono font-bold')
+                        
+                        # Global Interlock Connectivity Banner View Card - a
+                        # compact strip rather than the old full-page-width bar,
+                        # but no longer truncated/max-width-constrained either -
+                        # the full status message must stay readable, so this
+                        # sizes to its own content instead of cropping with an
+                        # ellipsis.
+                        self.connection_alert_banner = ui.row().classes('items-center gap-2 px-3 py-1 rounded-lg border shadow-sm transition-all duration-300')
+                        with self.connection_alert_banner:
+                            self.banner_icon = ui.icon('report_problem', size='xs')
+                            self.banner_text = ui.label("Syncing hardware layers...").classes('text-[11px]')
 
                 # Center Card View Tab selectors layout element frame
                 with ui.card().classes('w-full p-0 rounded-lg border shadow-sm no-wrap overflow-hidden').style("background-color: #2D3748; border-color: #1A202C;"):
@@ -166,12 +181,12 @@ class RIIDSpectroscopyApp:
             self.connection_alert_banner.classes(add='bg-green-50 border-green-200 text-green-800', remove='bg-red-50 border-red-200 text-red-800')
             self.banner_icon.set_visibility(False)
             self.banner_text.set_text(f"Hardware connection online: {current_status}")
-            self.banner_status_pill.set_text("ONLINE").classes(add='bg-green-100 text-green-800', remove='bg-red-100 text-red-800')
+            self.banner_status_pill.set_text("ONLINE").classes(add='text-green-800', remove='text-red-800')
         else:
             self.connection_alert_banner.classes(add='bg-red-50 border-red-200 text-red-800', remove='bg-green-50 border-green-200 text-green-800')
             self.banner_icon.set_visibility(True).style("color: #B9222D;")
             self.banner_text.set_text("⚠️ MCA HARDWARE CRITICAL FAILURE: Connection broken or device disconnected. Checking port link auto-discovery loop...")
-            self.banner_status_pill.set_text("DISCONNECTED").classes(add='bg-red-100 text-red-800', remove='bg-green-100 text-green-800')
+            self.banner_status_pill.set_text("DISCONNECTED").classes(add='text-red-800', remove='text-green-800')
 
         # NOTE: DPP parameters are no longer pushed to the board from this polling tick.
         # They are only ever transmitted by push_active_profile_to_board(), which is

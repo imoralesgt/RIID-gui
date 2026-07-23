@@ -27,7 +27,6 @@ class SpectraDownloadPanel:
     def render_layout(self):
         with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white gap-3').style('border-color: #E2E8F0;'):
             ui.label('Download Recorded Spectra').classes('text-sm font-bold').style(f"color: {BRAND_COLORS['primary']};")
-            ui.markdown("📦 **Bulk Export:** Select files from any category below and download them together as a single .zip archive.").classes('text-xs text-zinc-600')
 
             with ui.tabs().classes('w-full dense border-b').style(f"color: {BRAND_COLORS['secondary']};") as category_selector:
                 tab_refs = {key: ui.tab(label, icon='folder').classes('text-xs') for key, label in self.CATEGORIES}
