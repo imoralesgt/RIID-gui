@@ -149,6 +149,13 @@ class MlInference:
         
         self.__min_counts = new_min_counts
 
+    def get_min_counts(self) -> int:
+        """Returns the current minimum single-channel count required to
+        trigger ML inference - lets callers (e.g. RIIDCoreService.set_ml_model)
+        read the operator's current setting before reconstructing this class
+        for a different model, so it isn't silently reset to the default."""
+        return self.__min_counts
+
     def update_classification_threshold(self, new_threshold : float):
         """
         Updates the multi-label classification threshold (self.CLASSIFICATION_THRESHOLD)

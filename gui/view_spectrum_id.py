@@ -691,6 +691,7 @@ class ControlPanelSidebar:
             ui.label('Survey Control Console').classes('text-xs font-bold text-zinc-400 uppercase tracking-widest border-b pb-1 w-full border-zinc-700')
             
             with ui.column().classes('w-full gap-2 bg-zinc-800 p-3 rounded-md border border-zinc-700 shadow-inner'):
+                ui.label('ML Pipeline Settings').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-wide')
                 # Issue #67: replaces the old "ML Detection Threshold (cts)"
                 # counts-based numeric input, in this exact sidebar slot, with
                 # a confidence-based slider (50%-99.9%) controlling
@@ -705,6 +706,19 @@ class ControlPanelSidebar:
                 self.threshold_slider = ui.slider(
                     min=0.50, max=0.999, step=0.001, value=initial_threshold,
                     on_change=self.trigger_threshold_change
+                ).props('color=primary').classes('w-full')
+                
+                # Controls MlInference's own internal gate (see
+                # set_ml_min_counts's docstring for how this differs from the
+                # removed min_counts_trigger) - the minimum peak count in a
+                # single channel, after background subtraction, before the ML
+                # pipeline attempts classification at all rather than
+                # returning "not enough counts".
+                initial_min_counts = self.service.ml_inference.get_min_counts()
+                self.min_counts_label = ui.label(f"Min. Counts to Trigger ML ({initial_min_counts} cts)").classes('text-xs text-zinc-300')
+                self.min_counts_slider = ui.slider(
+                    min=1, max=200, step=1, value=initial_min_counts,
+                    on_change=self.trigger_min_counts_change
                 ).props('color=primary').classes('w-full')
                 
                 self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
@@ -778,6 +792,14 @@ class ControlPanelSidebar:
         new_threshold = float(e.value)
         self.threshold_label.set_text(f"Detection Threshold ({new_threshold * 100:.1f}%)")
         self.service.set_ml_classification_threshold(new_threshold)
+
+    def trigger_min_counts_change(self, e):
+        """Updates MlInference's minimum single-channel count required to
+        attempt classification, live as the slider moves - same not-gated-to-
+        idle reasoning as the threshold slider above."""
+        new_min_counts = int(e.value)
+        self.min_counts_label.set_text(f"Min. Counts to Trigger ML ({new_min_counts} cts)")
+        self.service.set_ml_min_counts(new_min_counts)
 
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
