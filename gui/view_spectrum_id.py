@@ -28,12 +28,12 @@ class SpectrumPlotContainer:
             # Issue #67: was a static label, now a live model-switcher. Enabled
             # only while idle (see update_ui_elements) - switching models
             # mid-survey would produce a confusing mix of old/new-model results.
-            with ui.column().classes('flex-1 items-center justify-center p-3 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0;'):
+            with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
                 self.model_select = ui.select(
                     {'cnn_multilabel': 'cnn_multilabel', 'cnn_deep': 'cnn_deep'},
                     value=getattr(self.service, 'ml_model_name', 'cnn_multilabel'),
                     on_change=self.trigger_model_change
-                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0;')
+                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0; line-height: 1.2;')
                 ui.label('ML MODEL').classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         
         # ============ MAIN CONTENT: spectrum (left) + RIID results (right) ============
@@ -109,9 +109,12 @@ class SpectrumPlotContainer:
 
     def _build_metric_card(self, label: str) -> ui.label:
         """Builds one of the top summary cards (issue #37) and returns its
-        value label so callers can update it directly."""
-        with ui.column().classes('flex-1 items-center justify-center p-3 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0;'):
-            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151;')
+        value label so callers can update it directly. Fixed height (issue
+        #67 follow-up) so all four cards in the row - including the ML Model
+        select, which has its own internal Quasar sizing quirks - line up
+        uniformly regardless of what each one's content naturally wants."""
+        with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
+            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151; line-height: 1.2;')
             ui.label(label.upper()).classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         return value_lbl
 
@@ -288,7 +291,7 @@ class SpectrumPlotContainer:
                 'paper_bgcolor': BRAND_COLORS['plot_paper'], 
                 'showlegend': True,
                 'barmode': 'overlay',
-                'legend': {'font': {'size': 11}, 'x': 0.70, 'y': 0.95, 'bgcolor': get_rgba_fill('legend_bg', alpha=0.7)},
+                'legend': {'font': {'size': 11}, 'x': 0.98, 'xanchor': 'right', 'y': 0.95, 'bgcolor': get_rgba_fill('legend_bg', alpha=0.7)},
                 'uirevision': self.PLOT_UIREVISION,
             }
         }
@@ -454,8 +457,8 @@ class SpectrumPlotContainer:
         
         Returns:
             (list | None, str): (scaled background counts matching
-            num_channels, or None if unavailable/length-mismatched; a human-
-            readable label describing what the scaling represents).
+            num_channels, or None if unavailable/length-mismatched; the
+            complete, ready-to-use trace name).
         """
         if not bg_data or len(bg_data) != num_channels:
             return None, "Environmental Background"
@@ -469,10 +472,13 @@ class SpectrumPlotContainer:
         if state == 'ACQUIRING_SURVEY' or show_frozen_survey:
             survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
             time_scaling_factor = float(survey_ms / bg_ms)
-            label = f"Normalized to {survey_ms/1000:.1f}s"
+            # Issue #39 follow-up: dropped the "(Normalized to Xs)" duration
+            # detail - the operator already sees the survey's live time via
+            # the other indicators (the LIVE TIME metric card, OP_STATE line).
+            label = "Normalized background"
         else:
             time_scaling_factor = 1.0
-            label = f"{bg_ms/1000:.1f}s Reference"
+            label = "Background"
         
         return [float(counts * time_scaling_factor) for counts in bg_data], label
 
@@ -489,7 +495,7 @@ class SpectrumPlotContainer:
             scaled_bg, label = self._compute_normalized_background(bg_data, state, num_channels)
             if scaled_bg is not None:
                 target_raw_y = scaled_bg
-                trace_name = f"Background ({label})"
+                trace_name = label  # already the complete, ready-to-use trace name
 
         if target_raw_y is not None and len(target_raw_y) == num_channels:
             peak_y = float(max(target_raw_y)) if target_raw_y else 0.0
@@ -537,9 +543,9 @@ class SpectrumPlotContainer:
             
             # FIXED: Dynamically embed the current CPS metrics straight into the plot trace name label string
             if state == 'ACQUIRING_SURVEY':
-                legend_label_name = f"Live Survey Session ({cps_string} CPS)"
+                legend_label_name = f"Live Survey ({cps_string} cps)"
             else:
-                legend_label_name = f"Last Survey (Stopped, {cps_string} CPS)"
+                legend_label_name = f"Last Survey (Stopped, {cps_string} cps)"
             
             if use_log:
                 # FIXED MODIFICATION: No area shading fill is added under the curve when in log scale
@@ -602,11 +608,24 @@ class SpectrumPlotContainer:
         
         has_background = bool(bg_data) and len(bg_data) > 0
         if has_background:
-            trace_name = f"Spectrum − Background ({cps_string} CPS)"
+            # Issue #39 follow-up: the legend's count-rate is the NET
+            # (subtracted) rate - total count-rate minus the background's own
+            # rate - not the raw total rate (which is what cps_string, passed
+            # in from update_ui_elements, represents and is used for the
+            # overlay mode's "Live Survey" label instead). Clipped to >= 0:
+            # with few counts (e.g. early in a survey), statistical noise can
+            # momentarily make the background's own rate exceed the survey's,
+            # which would otherwise show a nonsensical negative count-rate.
+            survey_secs = survey_ms / 1000.0
+            bg_secs = bg_ms / 1000.0
+            raw_cps = float(sum(spectrum_data)) / survey_secs if survey_secs > 0 else 0.0
+            bg_cps = float(sum(bg_data)) / bg_secs if bg_secs > 0 else 0.0
+            net_cps_string = f"{max(0.0, raw_cps - bg_cps):.2f}"
+            trace_name = f"Live survey, no bkg. ({net_cps_string} cps)"
         else:
             # subtract_background() itself falls back to the raw spectrum when
             # there's nothing usable to subtract - name the trace accordingly.
-            trace_name = f"Live Survey Session ({cps_string} CPS) - no background to subtract"
+            trace_name = f"Live Survey Session ({cps_string} cps) - no background to subtract"
         
         peak_y = float(max(subtracted)) if subtracted else 0.0
         processed_y = [v if v >= 1 else 1 for v in subtracted] if use_log else subtracted
@@ -875,7 +894,7 @@ class ControlPanelSidebar:
             # FIXED: Formally display the calculated hardware CPS metric on the panel view label
             self.status_lbl.set_text(
                 f"OP_STATE: SURVEY ACTIVE | TIME: {survey_seconds:.1f}s | "
-                f"COUNTS: {total_counts} | RATE: {cps_rate:.2f} CPS"
+                f"COUNTS: {total_counts} | RATE: {cps_rate:.2f} cps"
             )
         else:
             self.status_lbl.set_text(f"OP_STATE: {self.service.status_text.upper()}")
