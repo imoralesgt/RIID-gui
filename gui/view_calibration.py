@@ -1,6 +1,6 @@
 import json
 from nicegui import ui
-from config import BRAND_COLORS, logger
+from config import BRAND_COLORS, HARDWARE_DEFAULTS, logger
 
 class HardwareCalibrationPanel:
     def __init__(self, system, title_sync_callback=None, push_profile_callback=None):
@@ -20,39 +20,39 @@ class HardwareCalibrationPanel:
                     with ui.row().classes('w-full gap-3 items-center'):
                         self.sn_badge = ui.label(f"Base S/N: {self.system.serial_number}").classes('text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded border')
                         
-                        self.sys_id_input = ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', 'SYS-STANDBY'), 
+                        self.sys_id_input = ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', HARDWARE_DEFAULTS['SYS-ID']), 
                                                      on_change=lambda e: self.system.hw_profile.update({'SYS-ID': e.value})).props('dense outlined').classes('w-28 text-xs')
                         
-                        self.analyzer_name_input = ui.input('Analyzer Model Name', value=self.system.hw_profile.get('Analyzer name', 'UNKNOWN'), 
+                        self.analyzer_name_input = ui.input('Analyzer Model Name', value=self.system.hw_profile.get('Analyzer name', HARDWARE_DEFAULTS['Analyzer name']), 
                                                              on_change=lambda e: self.system.hw_profile.update({'Analyzer name': e.value})).props('dense outlined').classes('flex-1 text-xs')
 
                     with ui.row().classes('w-full gap-3'):
-                        self.det_type_input = ui.input('Detector Type Class', value=self.system.hw_profile.get('Detector type', 'NaI(Tl)'), on_change=lambda e: self.system.hw_profile.update({'Detector type': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.det_size_input = ui.input('Detector Geometrical Size', value=self.system.hw_profile.get('Detector size', ''), on_change=lambda e: self.system.hw_profile.update({'Detector size': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                    self.det_sn_input = ui.input('Detector Factory S/N Code', value=self.system.hw_profile.get('Detector serial number', 'UNKNOWN'), on_change=lambda e: self.system.hw_profile.update({'Detector serial number': e.value})).props('dense outlined').classes('w-full text-xs')
+                        self.det_type_input = ui.input('Detector Type Class', value=self.system.hw_profile.get('Detector type', HARDWARE_DEFAULTS['Detector type']), on_change=lambda e: self.system.hw_profile.update({'Detector type': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.det_size_input = ui.input('Detector Geometrical Size', value=self.system.hw_profile.get('Detector size', HARDWARE_DEFAULTS['Detector size']), on_change=lambda e: self.system.hw_profile.update({'Detector size': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                    self.det_sn_input = ui.input('Detector Factory S/N Code', value=self.system.hw_profile.get('Detector serial number', HARDWARE_DEFAULTS['Detector serial number']), on_change=lambda e: self.system.hw_profile.update({'Detector serial number': e.value})).props('dense outlined').classes('w-full text-xs')
                     
                     ui.label('Energy Calibration Coefficients ($MCA_CAL Matrix Model)').classes('text-xs font-bold mt-2').style(f"color: {BRAND_COLORS['primary']};")
                     with ui.row().classes('w-full gap-2'):
-                        self.cal_a0_input = ui.number('Offset / a0', value=self.system.hw_profile.get('calib_a0', 0.0), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a0': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.cal_a1_input = ui.number('Linear Slope / a1', value=self.system.hw_profile.get('calib_a1', 1.0), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a1': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.cal_a2_input = ui.number('Quadratic Scalar / a2', value=self.system.hw_profile.get('calib_a2', 0.0), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'calib_a2': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.cal_a0_input = ui.number('Offset / a0', value=self.system.hw_profile.get('calib_a0', HARDWARE_DEFAULTS['calib_a0']), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a0': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.cal_a1_input = ui.number('Linear Slope / a1', value=self.system.hw_profile.get('calib_a1', HARDWARE_DEFAULTS['calib_a1']), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a1': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.cal_a2_input = ui.number('Quadratic Scalar / a2', value=self.system.hw_profile.get('calib_a2', HARDWARE_DEFAULTS['calib_a2']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'calib_a2': e.value})).props('dense outlined').classes('flex-1 text-xs')
 
             with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
                 with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3 h-full'):
                     ui.label('Advanced MCA settings').classes('text-xs font-bold uppercase tracking-wider text-zinc-700 border-b pb-1 w-full')
                     with ui.row().classes('w-full gap-3'):
-                        self.vga_gain_input = ui.number('Coarse VGA Analog Gain', value=self.system.hw_profile.get('vga_gain_coarse', 4.0), format='%.2f', on_change=lambda e: self.system.hw_profile.update({'vga_gain_coarse': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.smooth_input = ui.number('Channel Filter Smoothing Factor', value=self.system.hw_profile.get('smoothing_factor', 2), format='%d', on_change=lambda e: self.system.hw_profile.update({'smoothing_factor': int(e.value or 2)})).props('dense outlined').classes('flex-1 text-xs')
+                        self.vga_gain_input = ui.number('Coarse VGA Analog Gain', value=self.system.hw_profile.get('vga_gain_coarse', HARDWARE_DEFAULTS['vga_gain_coarse']), format='%.2f', on_change=lambda e: self.system.hw_profile.update({'vga_gain_coarse': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.smooth_input = ui.number('Channel Filter Smoothing Factor', value=self.system.hw_profile.get('smoothing_factor', HARDWARE_DEFAULTS['smoothing_factor']), format='%d', on_change=lambda e: self.system.hw_profile.update({'smoothing_factor': int(e.value or HARDWARE_DEFAULTS['smoothing_factor'])})).props('dense outlined').classes('flex-1 text-xs')
                     with ui.row().classes('w-full gap-3'):
-                        self.tau_pk_input = ui.number('Shaper Peaking Time (s)', value=self.system.hw_profile.get('shaper_s_tau_pk', 2.5e-6), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'shaper_s_tau_pk': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.tau_top_input = ui.number('Shaper Flat Top (s)', value=self.system.hw_profile.get('shaper_s_tau_pk_top', 1.0e-6), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'shaper_s_tau_pk_top': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.tau_pk_input = ui.number('Shaper Peaking Time (s)', value=self.system.hw_profile.get('shaper_s_tau_pk', HARDWARE_DEFAULTS['shaper_s_tau_pk']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'shaper_s_tau_pk': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.tau_top_input = ui.number('Shaper Flat Top (s)', value=self.system.hw_profile.get('shaper_s_tau_pk_top', HARDWARE_DEFAULTS['shaper_s_tau_pk_top']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'shaper_s_tau_pk_top': e.value})).props('dense outlined').classes('flex-1 text-xs')
                     with ui.row().classes('w-full gap-3'):
                         # FIXED: Decoupled `.props()` completely out of internal lambda parameter body
-                        self.tau_d_input = ui.number('Detector Decay Tau_d (s)', value=self.system.hw_profile.get('tau_d', 1.21e-6), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'tau_d': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.tau_r_input = ui.number('Detector Rise Tau_r (s)', value=self.system.hw_profile.get('tau_r', 0.206e-6), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'tau_r': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.tau_d_input = ui.number('Detector Decay Tau_d (s)', value=self.system.hw_profile.get('tau_d', HARDWARE_DEFAULTS['tau_d']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'tau_d': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.tau_r_input = ui.number('Detector Rise Tau_r (s)', value=self.system.hw_profile.get('tau_r', HARDWARE_DEFAULTS['tau_r']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'tau_r': e.value})).props('dense outlined').classes('flex-1 text-xs')
                     with ui.row().classes('w-full gap-3 items-center justify-between'):
-                        self.blr_input = ui.number('BLR Threshold Gain', value=self.system.hw_profile.get('blr_s_threshold_gain', 4.0), format='%.2f', on_change=lambda e: self.system.hw_profile.update({'blr_s_threshold_gain': e.value})).props('dense outlined').classes('flex-1 text-xs')
-                        self.invert_checkbox = ui.checkbox('Invert Pulse Polarity', value=self.system.hw_profile.get('invert_pulse', False), on_change=lambda e: self.system.hw_profile.update({'invert_pulse': e.value})).classes('text-xs text-zinc-700 font-medium px-1')
+                        self.blr_input = ui.number('BLR Threshold Gain', value=self.system.hw_profile.get('blr_s_threshold_gain', HARDWARE_DEFAULTS['blr_s_threshold_gain']), format='%.2f', on_change=lambda e: self.system.hw_profile.update({'blr_s_threshold_gain': e.value})).props('dense outlined').classes('flex-1 text-xs')
+                        self.invert_checkbox = ui.checkbox('Invert Pulse Polarity', value=self.system.hw_profile.get('invert_pulse', HARDWARE_DEFAULTS['invert_pulse']), on_change=lambda e: self.system.hw_profile.update({'invert_pulse': e.value})).classes('text-xs text-zinc-700 font-medium px-1')
 
         with ui.row().classes('w-full mt-3 justify-end'):
             def save_calibration_profile_to_database():
@@ -85,19 +85,19 @@ class HardwareCalibrationPanel:
         self.last_bound_serial = current_sn
         self.sn_badge.set_text(f"Base S/N: {current_sn}")
         
-        self.sys_id_input.set_value(prof.get('SYS-ID', 'SYS-STANDBY'))
-        self.analyzer_name_input.set_value(prof.get('Analyzer name', 'UNKNOWN'))
-        self.det_type_input.set_value(prof.get('Detector type', 'NaI(Tl)'))
-        self.det_size_input.set_value(prof.get('Detector size', ''))
-        self.det_sn_input.set_value(prof.get('Detector serial number', 'UNKNOWN'))
-        self.cal_a0_input.set_value(prof.get('calib_a0', 0.0))
-        self.cal_a1_input.set_value(prof.get('calib_a1', 1.0))
-        self.cal_a2_input.set_value(prof.get('calib_a2', 0.0))
-        self.vga_gain_input.set_value(prof.get('vga_gain_coarse', 4.0))
-        self.smooth_input.set_value(prof.get('smoothing_factor', 2))
-        self.tau_pk_input.set_value(prof.get('shaper_s_tau_pk', 2.5e-6))
-        self.tau_top_input.set_value(prof.get('shaper_s_tau_pk_top', 1.0e-6))
-        self.tau_d_input.set_value(prof.get('tau_d', 1.21e-6))
-        self.tau_r_input.set_value(prof.get('tau_r', 0.206e-6))
-        self.blr_input.set_value(prof.get('blr_s_threshold_gain', 4.0))
-        self.invert_checkbox.set_value(prof.get('invert_pulse', False))
+        self.sys_id_input.set_value(prof.get('SYS-ID', HARDWARE_DEFAULTS['SYS-ID']))
+        self.analyzer_name_input.set_value(prof.get('Analyzer name', HARDWARE_DEFAULTS['Analyzer name']))
+        self.det_type_input.set_value(prof.get('Detector type', HARDWARE_DEFAULTS['Detector type']))
+        self.det_size_input.set_value(prof.get('Detector size', HARDWARE_DEFAULTS['Detector size']))
+        self.det_sn_input.set_value(prof.get('Detector serial number', HARDWARE_DEFAULTS['Detector serial number']))
+        self.cal_a0_input.set_value(prof.get('calib_a0', HARDWARE_DEFAULTS['calib_a0']))
+        self.cal_a1_input.set_value(prof.get('calib_a1', HARDWARE_DEFAULTS['calib_a1']))
+        self.cal_a2_input.set_value(prof.get('calib_a2', HARDWARE_DEFAULTS['calib_a2']))
+        self.vga_gain_input.set_value(prof.get('vga_gain_coarse', HARDWARE_DEFAULTS['vga_gain_coarse']))
+        self.smooth_input.set_value(prof.get('smoothing_factor', HARDWARE_DEFAULTS['smoothing_factor']))
+        self.tau_pk_input.set_value(prof.get('shaper_s_tau_pk', HARDWARE_DEFAULTS['shaper_s_tau_pk']))
+        self.tau_top_input.set_value(prof.get('shaper_s_tau_pk_top', HARDWARE_DEFAULTS['shaper_s_tau_pk_top']))
+        self.tau_d_input.set_value(prof.get('tau_d', HARDWARE_DEFAULTS['tau_d']))
+        self.tau_r_input.set_value(prof.get('tau_r', HARDWARE_DEFAULTS['tau_r']))
+        self.blr_input.set_value(prof.get('blr_s_threshold_gain', HARDWARE_DEFAULTS['blr_s_threshold_gain']))
+        self.invert_checkbox.set_value(prof.get('invert_pulse', HARDWARE_DEFAULTS['invert_pulse']))

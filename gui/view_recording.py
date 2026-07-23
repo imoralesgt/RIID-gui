@@ -13,6 +13,14 @@ class SpectrumRecordingPanel:
     # or the toolbar's Autoscale/Reset-axes button).
     PLOT_UIREVISION = 'batch_recording_plot'
 
+    # Default values for the per-source/per-shielding-layer runtime parameter
+    # widgets - referenced both at widget creation and by the fallback used
+    # when parsing their value, instead of each place re-typing its own copy
+    # (which had drifted out of sync for DEFAULT_SHIELDING_THICKNESS_MM: the
+    # widget's own creation default was 1.0, but the parsing fallback used 0).
+    DEFAULT_DISTANCE_CM = 20.0
+    DEFAULT_SHIELDING_THICKNESS_MM = 1.0
+
     def __init__(self, service):
         self.service = service
         self.system = service.system
@@ -129,9 +137,9 @@ class SpectrumRecordingPanel:
     def trigger_batch_start(self):
         logger.warning(f"[USER_ACTION] Operator triggered automated spectrum multi-run batch recording. prefix='{self.prefix_input.value}' | runs={self.runs_input.value}")
         self.service.start_batch_recording(
-            target_time=int(self.time_input.value or 30),
-            total_runs=int(self.runs_input.value or 1),
-            prefix=str(self.prefix_input.value or "spectrum")
+            target_time=int(self.time_input.value or self.service.DEFAULT_BATCH_TARGET_TIME_S),
+            total_runs=int(self.runs_input.value or self.service.DEFAULT_BATCH_TOTAL_RUNS),
+            prefix=str(self.prefix_input.value or self.service.DEFAULT_BATCH_PREFIX)
         )
 
     def trigger_batch_stop(self):
@@ -261,7 +269,7 @@ class SpectrumRecordingPanel:
             new_form = ui.input('Material Form Shape', value='point').props('dense outlined').classes('w-full text-xs')
 
             ui.markdown("--- *Volatile Geometrical Runtime Parameters* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
-            dist_input = ui.number('Distance to Detector (cm)', value=20.0, format='%.1f', min=0).props('dense outlined').classes('w-full text-xs')
+            dist_input = ui.number('Distance to Detector (cm)', value=self.DEFAULT_DISTANCE_CM, format='%.1f', min=0).props('dense outlined').classes('w-full text-xs')
             # Per-source notes: tied to THIS specific append instance, not the
             # persisted source record - deliberately excluded from save_to_database()
             # below, so it never ends up in sources.json. Only written into whatever
@@ -360,7 +368,7 @@ class SpectrumRecordingPanel:
                     "Date": metrics["date"],
                     "Type": metrics["type"], 
                     "Form": metrics["form"], 
-                    "Distance": f"{float(dist_input.value if dist_input.value is not None else 20):.1f} cm",
+                    "Distance": f"{float(dist_input.value if dist_input.value is not None else self.DEFAULT_DISTANCE_CM):.1f} cm",
                     "Notes": str(notes_input.value or "").strip()
                 })
                 self.sources_table.rows = self.system.runtime_metadata['Sources']
@@ -392,7 +400,7 @@ class SpectrumRecordingPanel:
             ui.label('Add New Shielding Layer / Absorber Row').classes('text-sm font-bold text-blue-600')
 
             symbol_input = ui.input('Material Symbol', placeholder='e.g. Pb, Al, Cu').props('dense outlined').classes('w-full text-xs')
-            thickness_input = ui.number('Thickness (mm)', value=1.0, format='%.2f', min=0).props('dense outlined').classes('w-full text-xs')
+            thickness_input = ui.number('Thickness (mm)', value=self.DEFAULT_SHIELDING_THICKNESS_MM, format='%.2f', min=0).props('dense outlined').classes('w-full text-xs')
             # Same handling as the per-source Notes field: free text, not persisted
             # to any database (there is none for shielding), only written into the
             # output .spe/.json spectrum files via runtime_metadata['Attenuators'].
@@ -415,7 +423,7 @@ class SpectrumRecordingPanel:
                 logger.info(f"[USER_ACTION] Appended shielding/absorber layer '{symbol}' into the transient run parameters.")
                 self.system.runtime_metadata['Attenuators'].append({
                     "Material Symbol": symbol,
-                    "Thickness (mm)": f"{float(thickness_input.value if thickness_input.value is not None else 0):.2f} mm",
+                    "Thickness (mm)": f"{float(thickness_input.value if thickness_input.value is not None else self.DEFAULT_SHIELDING_THICKNESS_MM):.2f} mm",
                     "Notes": str(notes_input.value or "").strip()
                 })
                 self.attenuators_table.rows = self.system.runtime_metadata['Attenuators']
@@ -423,7 +431,7 @@ class SpectrumRecordingPanel:
 
                 # Reset for the next entry rather than leaving stale values behind.
                 symbol_input.set_value('')
-                thickness_input.set_value(1.0)
+                thickness_input.set_value(self.DEFAULT_SHIELDING_THICKNESS_MM)
                 notes_input.set_value('')
 
             with ui.row().classes('w-full gap-2 pt-1'):

@@ -28,6 +28,16 @@ class RIIDCoreService:
     # Programmatic class constant for the unsigned 32-bit hardware register gating limit (2^32 - 1)
     MAX_32BIT_UINT = int(2**32 - 1)
 
+    # Default operational parameters - single source of truth. Referenced both
+    # here (initial state) and by the view layer's widget-creation/fallback-
+    # parsing code, instead of each place re-typing its own copy of the same
+    # number (which had already drifted out of sync in a couple of spots).
+    DEFAULT_MAX_COUNTS_LIMIT = 15000
+    DEFAULT_BG_TARGET_TIME_S = 30
+    DEFAULT_BATCH_TARGET_TIME_S = 30
+    DEFAULT_BATCH_TOTAL_RUNS = 1
+    DEFAULT_BATCH_PREFIX = "spectrum_run"
+
     def __init__(self, ml_model_name : str):
         logger.info("[SERVICE_INIT] Initializing spectroscopy operations hub...")
         self.system = SpectrumAcquisitionSystem()
@@ -46,20 +56,19 @@ class RIIDCoreService:
         self.batch_spectrum = [] 
         
         # Trigger thresholds for automated identification pipelines
-        self.min_counts_trigger = 2000    
-        self.max_counts_limit = 15000     
+        self.max_counts_limit = self.DEFAULT_MAX_COUNTS_LIMIT
         
         # Configuration presets for structural automated multi-run recordings
-        self.batch_target_time = 30
-        self.batch_total_runs = 1
+        self.batch_target_time = self.DEFAULT_BATCH_TARGET_TIME_S
+        self.batch_total_runs = self.DEFAULT_BATCH_TOTAL_RUNS
         self.batch_current_run = 0
         self.batch_elapsed_seconds = 0
-        self.batch_prefix = "spectrum_run"
+        self.batch_prefix = self.DEFAULT_BATCH_PREFIX
         self.batch_status_text = "Ready to acquire file records."
         
         # Live display state fields
         self.elapsed_seconds = 0
-        self.bg_target_time = 30
+        self.bg_target_time = self.DEFAULT_BG_TARGET_TIME_S
         self.bg_accumulated_seconds = 0
         self.survey_elapsed_seconds = 0
         self.bg_progress = 0.0
@@ -596,10 +605,7 @@ class RIIDCoreService:
                     self.current_isotope_id = "Buffer Reset. Re-accumulating..."
                     continue
                 
-                if total_counts >= self.min_counts_trigger:
-                    self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
-                else:
-                    self.current_isotope_id = f"Accumulating ({total_counts}/{self.min_counts_trigger} cts)"
+                self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
                     
         except Exception as e:
             logger.error(f"[HARDWARE] Continuous survey thread encountered an exception: {e}", exc_info=True)
@@ -648,10 +654,54 @@ class RIIDCoreService:
 
     def set_ml_classification_threshold(self, new_threshold: float):
         """Passthrough to MlInference.update_classification_threshold() - the
-        entry point a future GUI control (operator-adjustable detection
-        threshold) should call, so the view layer doesn't need to reach into
-        self.ml_inference directly."""
+        entry point the GUI's Detection Threshold slider (issue #67) calls,
+        so the view layer doesn't need to reach into self.ml_inference
+        directly."""
         self.ml_inference.update_classification_threshold(new_threshold)
+
+    def set_ml_model(self, model_name: str) -> tuple:
+        """Issue #67: swaps the active ML model at runtime (cnn_multilabel /
+        cnn_deep). Reconstructs self.ml_inference with the new model, since
+        MlInference doesn't support hot-swapping its underlying model file -
+        but carries the current background data and classification threshold
+        over to the new instance, so switching models doesn't silently reset
+        either of those.
+        
+        Only meaningful while idle - the model choice affects what
+        _execute_ml_pipeline() returns (including the label SET itself, since
+        cnn_deep and cnn_multilabel have different classes), so switching
+        mid-survey could produce a confusing mix of old- and new-model
+        results. The GUI is expected to only enable this control while
+        stopped, but this method also guards defensively.
+        
+        Returns:
+            (bool, str): (success, message) for the UI to display.
+        """
+        if self.state != 'IDLE':
+            return False, "Cannot switch ML models while a survey/recording is active."
+        
+        try:
+            current_threshold = self.ml_inference.CLASSIFICATION_THRESHOLD
+            bg_live_time_s = float(self.bg_hardware_live_time_ms or 0.0) / 1000.0
+            new_inference = MlInference(
+                ml_model_name=model_name,
+                min_counts=20,
+                bkgnd_data=self.background_spectrum,
+                bkgnd_live_time=bg_live_time_s
+            )
+            new_inference.update_classification_threshold(current_threshold)
+            self.ml_inference = new_inference
+            self.ml_model_name = model_name
+            # Any previous inference result belonged to the old model's label
+            # set - stale/incompatible with the new one (cnn_deep and
+            # cnn_multilabel don't share the same classes), so clear it
+            # rather than risk displaying mismatched class names.
+            self.last_ml_result = None
+            logger.warning(f"[USER_ACTION] Operator switched ML model to '{model_name}'.")
+            return True, f"Switched to {model_name}."
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to switch ML model to '{model_name}': {e}", exc_info=True)
+            return False, f"Failed to switch model: {e}"
 
     def clear_cps_history(self):
         """Clears the count-rate plot's rolling history (issue #34's plot).
