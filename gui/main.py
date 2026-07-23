@@ -129,7 +129,7 @@ class RIIDSpectroscopyApp:
                         with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
                             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 72%; border-color: #E2E8F0;'):
                                 self.plot_view = SpectrumPlotContainer(backend_service)
-                            with ui.card().classes('p-4 rounded-lg border shadow-md bg-zinc-900 gap-3 text-white').style('width: 28%; max-width: 340px;'):
+                            with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3').style('width: 28%; max-width: 340px; border-color: #E2E8F0;'):
                                 self.sidebar = ControlPanelSidebar(backend_service, self.plot_view)
 
                     with ui.tab_panel(self.tab_recording).classes('p-0 m-0 bg-transparent'):

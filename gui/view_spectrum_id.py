@@ -734,10 +734,10 @@ class ControlPanelSidebar:
         self._assemble_ui()
 
     def _assemble_ui(self):
-        with ui.column().classes('w-full gap-4 text-slate-200'):
-            ui.label('Survey Control Console').classes('text-xs font-bold text-zinc-400 uppercase tracking-widest border-b pb-1 w-full border-zinc-700')
+        with ui.column().classes('w-full gap-4'):
+            ui.label('Survey Control Console').classes('text-xs font-bold uppercase tracking-widest border-b pb-1 w-full').style(f"color: {BRAND_COLORS['primary']}; border-color: #E2E8F0;")
             
-            with ui.column().classes('w-full gap-2 bg-zinc-800 p-3 rounded-md border border-zinc-700 shadow-inner'):
+            with ui.column().classes('w-full gap-2 bg-slate-50 p-3 rounded-md border shadow-inner').style('border-color: #E2E8F0;'):
                 ui.label('ML Pipeline Settings').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-wide')
                 # Issue #67: replaces the old "ML Detection Threshold (cts)"
                 # counts-based numeric input, in this exact sidebar slot, with
@@ -749,7 +749,7 @@ class ControlPanelSidebar:
                 # has been removed entirely - inference is now always attempted,
                 # relying on MlInference's own internal not-enough-counts check.
                 initial_threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
-                self.threshold_label = ui.label(f"Detection Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-300')
+                self.threshold_label = ui.label(f"Detection Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-700')
                 self.threshold_slider = ui.slider(
                     min=0.50, max=0.999, step=0.001, value=initial_threshold,
                     on_change=self.trigger_threshold_change
@@ -762,30 +762,54 @@ class ControlPanelSidebar:
                 # pipeline attempts classification at all rather than
                 # returning "not enough counts".
                 initial_min_counts = self.service.ml_inference.get_min_counts()
-                self.min_counts_label = ui.label(f"Min. Counts to Trigger ML ({initial_min_counts} cts)").classes('text-xs text-zinc-300')
+                self.min_counts_label = ui.label(f"Min. Counts to Trigger ML ({initial_min_counts} cts)").classes('text-xs text-zinc-700')
                 self.min_counts_slider = ui.slider(
                     min=1, max=200, step=1, value=initial_min_counts,
                     on_change=self.trigger_min_counts_change
                 ).props('color=primary').classes('w-full')
                 
-                self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
+                self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs').props('dense outlined')
 
-            with ui.column().classes('w-full p-3 bg-black border border-zinc-800 rounded-md gap-1 font-mono text-xs text-emerald-400'):
-                self.status_lbl = ui.label('SYSTEM: Syncing...')
-                self.bg_status_lbl = ui.label('BACKGROUND: Missing Profile')
+            # ============ LIVE SURVEY (primary workflow) ============
+            # Directly below ML Pipeline Settings now that the diagnostic
+            # console has moved to a collapsed panel at the bottom - these are
+            # the two things an operator actually touches during a normal
+            # survey, so they sit together at the top of the card.
+            with ui.column().classes('w-full gap-2 bg-slate-50 p-3 rounded-md border shadow-inner').style('border-color: #E2E8F0;'):
+                ui.label('Live Survey').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-wide')
+                
+                # Shown instead of the controls below when no background exists
+                # yet - a survey can't meaningfully start without one anyway
+                # (see play_stop_btn's existing has_bg gate), so this makes
+                # that requirement explicit rather than just leaving an empty
+                # gap where the buttons would be.
+                self.no_bg_message = ui.label("Load/record background to start").classes('text-xs text-zinc-500 italic text-center w-full py-2')
+                self.no_bg_message.set_visibility(False)
+                
+                with ui.row().classes('w-full gap-2 no-wrap pt-1') as self.live_survey_controls_row:
+                    self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
+                    self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
+                    self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
+                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
+
+                # Issue #41: bundles the last spectrum shown here with the current
+                # background into a downloadable .zip (both in .json and .spe).
+                # Visible only once a background has settled (see refresh_widget_states).
+                self.download_riid_btn = ui.button('Download Spectrum', icon='download', on_click=self.trigger_download_riid)
+                self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full mt-1 py-1.5 text-xs')
 
             # ============ BACKGROUND SPECTRUM (collapsible) ============
             # Recording/loading/storing a background is a secondary, occasional
             # workflow compared to running a live survey - grouping it into a
             # single collapsed-by-default panel keeps it one click away without
-            # competing for attention with the always-visible Live Survey
-            # controls below. Auto-expands while a capture is actively running
-            # (see refresh_widget_states) so its progress bar stays visible.
-            with ui.expansion('Background Spectrum', icon='security', value=False) \
-                    .classes('w-full bg-zinc-800 border border-zinc-700 rounded-md') \
-                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-300"') as self.bg_expansion:
+            # competing for attention with the Live Survey card above.
+            # Auto-expands while a capture is actively running (see
+            # refresh_widget_states) so its progress bar stays visible.
+            with ui.expansion('Background Spectrum', icon='ssid_chart', value=False) \
+                    .classes('w-full bg-slate-50 border rounded-md').style('border-color: #E2E8F0;') \
+                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-700"') as self.bg_expansion:
                 with ui.column().classes('w-full gap-2 p-2'):
-                    self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
+                    self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs').props('dense outlined')
 
                     self.bg_progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 rounded transition-all').props('color=amber')
                     self.bg_progress_bar.set_visibility(False)
@@ -793,20 +817,20 @@ class ControlPanelSidebar:
                     self.bg_btn = ui.button('RECORD BACKGROUND SPECTRUM', icon='security', on_click=self.trigger_bg)
                     self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
 
-                    ui.separator().classes('bg-zinc-700')
+                    ui.separator().classes('bg-gray-200')
 
                     # Issue #44: lets the operator load an already-saved background
                     # (see issue #45) instead of recording a fresh one. Purely
                     # additive - the RECORD flow above is completely untouched.
                     with ui.column().classes('w-full gap-1') as self.load_bg_group:
                         with ui.row().classes('w-full gap-2 items-end'):
-                            self.bg_file_select = ui.select(options=[], label='Load Pre-Recorded Background').props('dense outlined dark').classes('flex-1 text-xs')
-                            ui.button(icon='refresh', on_click=self.refresh_bg_file_list).props('dense flat round').classes('text-zinc-300')
+                            self.bg_file_select = ui.select(options=[], label='Load Pre-Recorded Background').props('dense outlined').classes('flex-1 text-xs')
+                            ui.button(icon='refresh', on_click=self.refresh_bg_file_list).props('dense flat round').classes('text-zinc-600')
                         self.load_bg_btn = ui.button('LOAD SELECTED BACKGROUND', icon='folder_open', on_click=self.trigger_load_bg)
                         self.load_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
                     self.refresh_bg_file_list()
 
-                    ui.separator().classes('bg-zinc-700')
+                    ui.separator().classes('bg-gray-200')
 
                     # Issue #45: lets the operator persist the latest recorded
                     # background spectrum to disk (data/spectra/background/),
@@ -817,19 +841,18 @@ class ControlPanelSidebar:
                     self.save_bg_btn = ui.button('Store Background Spectrum', icon='save', on_click=self.open_save_bg_dialog)
                     self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
 
-            # ============ LIVE SURVEY (always visible - primary workflow) ============
-            ui.label('Live Survey').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1')
-            with ui.row().classes('w-full gap-2 no-wrap pt-1'):
-                self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
-                self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
-                self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
-                self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
-
-            # Issue #41: bundles the last spectrum shown here with the current
-            # background into a downloadable .zip (both in .json and .spe).
-            # Visible only once a background has settled (see refresh_widget_states).
-            self.download_riid_btn = ui.button('Download Spectrum', icon='download', on_click=self.trigger_download_riid)
-            self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full mt-1 py-1.5 text-xs')
+            # ============ SYSTEM CONSOLE (collapsible, closed by default) ============
+            # Raw status readout - moved to the bottom and collapsed by default,
+            # since it's diagnostic information the operator only needs to check
+            # occasionally, not something that should compete for space with the
+            # actual controls above. Light-themed now like the rest of the
+            # sidebar, rather than the dark/terminal look it had before.
+            with ui.expansion('System Console', icon='terminal', value=False) \
+                    .classes('w-full bg-slate-50 border rounded-md').style('border-color: #E2E8F0;') \
+                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-700"'):
+                with ui.column().classes('w-full gap-1 p-2 font-mono text-xs text-zinc-700'):
+                    self.status_lbl = ui.label('SYSTEM: Syncing...')
+                    self.bg_status_lbl = ui.label('BACKGROUND: Missing Profile')
 
     def trigger_threshold_change(self, e):
         """Issue #67: updates the multi-label classification threshold live
@@ -970,10 +993,24 @@ class ControlPanelSidebar:
 
         if has_bg:
             self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: CALIBRATED (READY)")
-            self.bg_status_lbl.style("color: #34D399;")
+            self.bg_status_lbl.style("color: #047857;")
         else:
             self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: ABSENT (LOCKED)")
-            self.bg_status_lbl.style("color: #F87171;")
+            self.bg_status_lbl.style("color: #B91C1C;")
+
+        # Nudges a first-time (or otherwise background-less) operator toward
+        # recording one: a gentle pulsing orange border on the panel itself,
+        # using Tailwind's built-in animate-pulse - no custom CSS/JS, and
+        # since the panel is collapsed by default, only its header row is
+        # visible while pulsing, so this stays subtle rather than flickering
+        # a large area. Off during an active BG capture (the panel already
+        # auto-expands then, so the cue would be redundant) and off as soon
+        # as a background exists.
+        needs_bg_highlight = not has_bg and not is_bg_running
+        if needs_bg_highlight:
+            self.bg_expansion.classes(add='border-2 animate-pulse').style(f"border-color: {BRAND_COLORS['subtracted_trace']};")
+        else:
+            self.bg_expansion.classes(remove='border-2 animate-pulse').style('border-color: #E2E8F0;')
 
         # Hide the entire panel during a live survey - simpler than showing the
         # BG collection time as a disabled field. Visible in every other state
@@ -1043,3 +1080,13 @@ class ControlPanelSidebar:
         # first; it's hidden only during BG recording / batch runs where clearing
         # would be ambiguous or unsafe.
         self.clear_btn.set_visibility(is_idle or is_survey_running)
+
+        # Replaces the controls entirely with an explicit message when idle
+        # with no background recorded yet - a survey can't meaningfully start
+        # in that state anyway (play_stop_btn's own gate above already
+        # prevents it), so this makes the reason obvious instead of just
+        # leaving START invisible with no explanation. download_riid_btn is
+        # already hidden in this case by its own has_bg gate a few lines up.
+        show_no_bg_message = is_idle and not has_bg
+        self.no_bg_message.set_visibility(show_no_bg_message)
+        self.live_survey_controls_row.set_visibility(not show_no_bg_message)
