@@ -242,13 +242,13 @@ class SpectrumPlotContainer:
         energy_axis = self._get_energy_axis(num_channels)
         
         # 2. Lifecycle step: Calculate the active real-time CPS metrics directly from MCA timers
-        cps_val_string = "0.00"
+        cps_raw_value = 0.0
         if (current_state == 'ACQUIRING_SURVEY' or show_frozen_survey) and spectrum_data:
             total_cts = sum(spectrum_data)
             survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
             survey_secs = float(survey_ms / 1000.0)
             if survey_secs > 0.0:
-                cps_val_string = f"{float(total_cts / survey_secs):.2f}"
+                cps_raw_value = float(total_cts / survey_secs)
 
         # Initialize trace list matrix
         plotly_traces = []
@@ -265,13 +265,13 @@ class SpectrumPlotContainer:
         elif self.viz_mode == 'subtracted':
             # Issue #39, visualization template 2: single background-subtracted trace.
             peak_y_value = self._append_subtracted_trace(
-                plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels, cps_val_string
+                plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels, cps_raw_value
             )
         else:
             # Issue #39, visualization template 1 (default): both traces overlaid.
             # 3. FIXED LAYER STACK: Append the live blue survey trace FIRST so it acts as the bottom layer
             peak_y_value = self._append_live_survey_trace(
-                plotly_traces, energy_axis, spectrum_data, current_state, use_log, peak_y_value, num_channels, cps_val_string
+                plotly_traces, energy_axis, spectrum_data, current_state, use_log, peak_y_value, num_channels, cps_raw_value
             )
             # 4. FIXED LAYER STACK: Append the environmental background trace SECOND to layer it on top
             peak_y_value = self._append_background_trace(
@@ -529,7 +529,51 @@ class SpectrumPlotContainer:
             
         return peak_y
 
-    def _append_live_survey_trace(self, traces: list, x_axis: list, spectrum_data: list, state: str, use_log: bool, current_peak_y: float, num_channels: int, cps_string: str) -> float:
+    @staticmethod
+    def _format_cps(value: float) -> str:
+        """Formats a count-rate for the live-survey / live-survey-minus-
+        background spectrum plot legends: 'cps' below 1000, 'kcps' at or
+        above 1000, always showing exactly 4 significant digits regardless of
+        magnitude (e.g. 79.83 cps, 5.456 cps, 1.235 kcps, 12.35 kcps).
+        
+        Does NOT use Python's '%.4g' format directly - for values >= 10000 that
+        would switch to scientific notation (e.g. '1.235e+04'), which isn't
+        wanted here. Computing the decimal count explicitly from the value's
+        own magnitude keeps the output as a plain, fixed-point number in
+        every case.
+        """
+        value = max(0.0, float(value))
+
+        def sig_figs(v: float) -> str:
+            if v == 0:
+                return "0.000"
+            magnitude = int(math.floor(math.log10(abs(v)))) + 1
+            decimals = max(0, 4 - magnitude)
+            formatted = f"{v:.{decimals}f}"
+            # Rounding can push the value up a full order of magnitude (e.g.
+            # 999.96 at 1 decimal -> "1000.0", or 0.99996 at 4 decimals ->
+            # "1.0000") - that leaves one extra digit, so redo with one fewer
+            # decimal to keep exactly 4 significant figures.
+            rounded = float(formatted)
+            new_magnitude = int(math.floor(math.log10(abs(rounded)))) + 1 if rounded != 0 else magnitude
+            if new_magnitude > magnitude:
+                decimals = max(0, decimals - 1)
+                formatted = f"{v:.{decimals}f}"
+            return formatted
+
+        if value >= 1000:
+            return f"{sig_figs(value / 1000.0)} kcps"
+
+        formatted = sig_figs(value)
+        # Edge case: rounding up (e.g. 999.96 -> "1000.0") can push the
+        # displayed value across the kcps threshold even though the raw value
+        # was just under it - recheck against the ROUNDED value so the unit
+        # shown always matches what's actually displayed.
+        if float(formatted) >= 1000:
+            return f"{sig_figs(value / 1000.0)} kcps"
+        return f"{formatted} cps"
+
+    def _append_live_survey_trace(self, traces: list, x_axis: list, spectrum_data: list, state: str, use_log: bool, current_peak_y: float, num_channels: int, cps_value: float) -> float:
         """Applies safe log filters and overlays the main active survey line with integrated label CPS readouts and scale-dependent shading."""
         peak_y = current_peak_y
         
@@ -543,9 +587,9 @@ class SpectrumPlotContainer:
             
             # FIXED: Dynamically embed the current CPS metrics straight into the plot trace name label string
             if state == 'ACQUIRING_SURVEY':
-                legend_label_name = f"Live Survey ({cps_string} cps)"
+                legend_label_name = f"Live Survey ({self._format_cps(cps_value)})"
             else:
-                legend_label_name = f"Last Survey (Stopped, {cps_string} cps)"
+                legend_label_name = f"Last Survey (Stopped, {self._format_cps(cps_value)})"
             
             if use_log:
                 # FIXED MODIFICATION: No area shading fill is added under the curve when in log scale
@@ -577,7 +621,7 @@ class SpectrumPlotContainer:
             
         return peak_y
 
-    def _append_subtracted_trace(self, traces: list, x_axis: list, spectrum_data: list, bg_data: list, state: str, use_log: bool, num_channels: int, cps_string: str) -> float:
+    def _append_subtracted_trace(self, traces: list, x_axis: list, spectrum_data: list, bg_data: list, state: str, use_log: bool, num_channels: int, cps_value: float) -> float:
         """Issue #39, visualization template 2: a single trace showing the live
         spectrum with the background subtracted out, matching the RadiaCode
         app's "Spectrum with subtracted background" template - as opposed to
@@ -610,7 +654,7 @@ class SpectrumPlotContainer:
         if has_background:
             # Issue #39 follow-up: the legend's count-rate is the NET
             # (subtracted) rate - total count-rate minus the background's own
-            # rate - not the raw total rate (which is what cps_string, passed
+            # rate - not the raw total rate (which is what cps_value, passed
             # in from update_ui_elements, represents and is used for the
             # overlay mode's "Live Survey" label instead). Clipped to >= 0:
             # with few counts (e.g. early in a survey), statistical noise can
@@ -620,12 +664,12 @@ class SpectrumPlotContainer:
             bg_secs = bg_ms / 1000.0
             raw_cps = float(sum(spectrum_data)) / survey_secs if survey_secs > 0 else 0.0
             bg_cps = float(sum(bg_data)) / bg_secs if bg_secs > 0 else 0.0
-            net_cps_string = f"{max(0.0, raw_cps - bg_cps):.2f}"
-            trace_name = f"Live survey, no bkg. ({net_cps_string} cps)"
+            net_cps = max(0.0, raw_cps - bg_cps)
+            trace_name = f"Live survey, no bkg. ({self._format_cps(net_cps)})"
         else:
             # subtract_background() itself falls back to the raw spectrum when
             # there's nothing usable to subtract - name the trace accordingly.
-            trace_name = f"Live Survey Session ({cps_string} cps) - no background to subtract"
+            trace_name = f"Live Survey Session ({self._format_cps(cps_value)}) - no background to subtract"
         
         peak_y = float(max(subtracted)) if subtracted else 0.0
         processed_y = [v if v >= 1 else 1 for v in subtracted] if use_log else subtracted
