@@ -1,10 +1,30 @@
 from nicegui import app, ui
+import os
 from config import BRAND_COLORS, logger
 from riid_service import RIIDCoreService
 from view_spectrum_id import SpectrumPlotContainer, ControlPanelSidebar
 from view_recording import SpectrumRecordingPanel
 from view_download import SpectraDownloadPanel
 from view_calibration import HardwareCalibrationPanel
+
+# Explicitly serves just this one file at a known URL, rather than relying on
+# ui.image()'s implicit "pass it a local path and hope it gets auto-served"
+# behavior - which is exactly the kind of path-resolution quirk that made the
+# favicon setting silently fail until the leading "./" was dropped. Mounting
+# a single named file (not the whole directory via add_static_files) also
+# avoids exposing the rest of this directory - source code, config, data -
+# over an unauthenticated static route.
+#
+# Absolute path, anchored to this file's own location (not the ambient
+# current working directory the app happens to be launched from) - removes
+# any remaining path-resolution ambiguity. Logged loudly if missing, so a
+# wrong path fails obviously instead of silently rendering nothing.
+_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'iaea_logo.png')
+if os.path.isfile(_LOGO_PATH):
+    app.add_static_file(local_file=_LOGO_PATH, url_path='/iaea_logo.png')
+    logger.info(f"[BOOT] Logo file found and mounted at /iaea_logo.png -> {_LOGO_PATH}")
+else:
+    logger.error(f"[BOOT] Logo file NOT FOUND at expected path: {_LOGO_PATH} - the header logo will not display.")
 
 # Name of the ML model used for RIID. Available options in folder `ml_models/`
 ML_MODEL_NAME = 'cnn_multilabel'
@@ -67,16 +87,33 @@ class RIIDSpectroscopyApp:
                 
                 # Application Header Layout Block
                 with ui.row().classes('w-full justify-between items-center px-2 py-1 border-b').style("border-color: #D1D5DB;"):
-                    ui.markdown(f"### **IAEA** RIID Laboratory Spectroscopy Station").classes('text-base font-bold text-slate-800 m-0 p-0')
-                    self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
-
-                # Global Interlock Connectivity Banner View Card
-                self.connection_alert_banner = ui.row().classes('w-full items-center justify-between px-4 py-2.5 rounded-lg border shadow-sm transition-all duration-300')
-                with self.connection_alert_banner:
                     with ui.row().classes('items-center gap-2'):
-                        self.banner_icon = ui.icon('report_problem', size='sm')
-                        self.banner_text = ui.label("Syncing hardware layers...")
-                    self.banner_status_pill = ui.label("").classes('text-[10px] font-mono font-bold px-2 py-0.5 rounded')
+                        ui.html('<img src="/iaea_logo.png" style="height: 60px; width: auto; display: block;" alt="IAEA logo" />')
+                        ui.markdown("# RIID and spectroscopy station").classes('text-base font-bold text-slate-800 m-0 p-0')
+                    
+                    # Station ID + connectivity status, stacked into two compact
+                    # rows on the right (was: Station ID here, then a separate
+                    # full-page-width status stripe below the whole header) - now
+                    # both rows together are sized to roughly match the logo's
+                    # height. The ONLINE/OFFLINE status text (with its color) is
+                    # embedded directly in the Station ID box itself, rather than
+                    # being a separate adjacent pill.
+                    with ui.column().classes('items-end gap-1'):
+                        with ui.row().classes('items-center gap-0 px-3 py-1 rounded bg-white shadow-sm border border-blue-200 no-wrap'):
+                            self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold text-blue-700')
+                            ui.label('|').classes('text-xs font-mono text-zinc-300 mx-2')
+                            self.banner_status_pill = ui.label("").classes('text-xs font-mono font-bold')
+                        
+                        # Global Interlock Connectivity Banner View Card - a
+                        # compact strip rather than the old full-page-width bar,
+                        # but no longer truncated/max-width-constrained either -
+                        # the full status message must stay readable, so this
+                        # sizes to its own content instead of cropping with an
+                        # ellipsis.
+                        self.connection_alert_banner = ui.row().classes('items-center gap-2 px-3 py-1 rounded-lg border shadow-sm transition-all duration-300')
+                        with self.connection_alert_banner:
+                            self.banner_icon = ui.icon('report_problem', size='xs')
+                            self.banner_text = ui.label("Syncing hardware layers...").classes('text-[11px]')
 
                 # Center Card View Tab selectors layout element frame
                 with ui.card().classes('w-full p-0 rounded-lg border shadow-sm no-wrap overflow-hidden').style("background-color: #2D3748; border-color: #1A202C;"):
@@ -92,7 +129,7 @@ class RIIDSpectroscopyApp:
                         with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
                             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 72%; border-color: #E2E8F0;'):
                                 self.plot_view = SpectrumPlotContainer(backend_service)
-                            with ui.card().classes('p-4 rounded-lg border shadow-md bg-zinc-900 gap-3 text-white').style('width: 28%; max-width: 340px;'):
+                            with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3').style('width: 28%; max-width: 340px; border-color: #E2E8F0;'):
                                 self.sidebar = ControlPanelSidebar(backend_service, self.plot_view)
 
                     with ui.tab_panel(self.tab_recording).classes('p-0 m-0 bg-transparent'):
@@ -144,12 +181,12 @@ class RIIDSpectroscopyApp:
             self.connection_alert_banner.classes(add='bg-green-50 border-green-200 text-green-800', remove='bg-red-50 border-red-200 text-red-800')
             self.banner_icon.set_visibility(False)
             self.banner_text.set_text(f"Hardware connection online: {current_status}")
-            self.banner_status_pill.set_text("ONLINE").classes(add='bg-green-100 text-green-800', remove='bg-red-100 text-red-800')
+            self.banner_status_pill.set_text("ONLINE").classes(add='text-green-800', remove='text-red-800')
         else:
             self.connection_alert_banner.classes(add='bg-red-50 border-red-200 text-red-800', remove='bg-green-50 border-green-200 text-green-800')
             self.banner_icon.set_visibility(True).style("color: #B9222D;")
             self.banner_text.set_text("⚠️ MCA HARDWARE CRITICAL FAILURE: Connection broken or device disconnected. Checking port link auto-discovery loop...")
-            self.banner_status_pill.set_text("DISCONNECTED").classes(add='bg-red-100 text-red-800', remove='bg-green-100 text-green-800')
+            self.banner_status_pill.set_text("DISCONNECTED").classes(add='text-red-800', remove='text-green-800')
 
         # NOTE: DPP parameters are no longer pushed to the board from this polling tick.
         # They are only ever transmitted by push_active_profile_to_board(), which is
@@ -163,4 +200,4 @@ def index():
     RIIDSpectroscopyApp()
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title="RIID Gamma Spectroscopy Station", port=8080)
+    ui.run(title="RIID Gamma Spectroscopy Station", port=8080, favicon=_LOGO_PATH)

@@ -10,6 +10,7 @@ from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RI
 from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
+from ml_preprocessing import MLPreprocessing
 
 class RIIDCoreService:
     # Centralized folder destination constant (issue #57: was the flat DATA_DIR
@@ -37,6 +38,11 @@ class RIIDCoreService:
     DEFAULT_BATCH_TARGET_TIME_S = 30
     DEFAULT_BATCH_TOTAL_RUNS = 1
     DEFAULT_BATCH_PREFIX = "spectrum_run"
+    # Minimum single-channel count (after background subtraction) required
+    # before MlInference.inference_pipeline() attempts classification at all -
+    # was hardcoded separately at both construction sites (__init__ and
+    # set_ml_model), now a single source of truth referenced by both.
+    DEFAULT_ML_MIN_COUNTS = 20
 
     def __init__(self, ml_model_name : str):
         logger.info("[SERVICE_INIT] Initializing spectroscopy operations hub...")
@@ -57,6 +63,12 @@ class RIIDCoreService:
         
         # Trigger thresholds for automated identification pipelines
         self.max_counts_limit = self.DEFAULT_MAX_COUNTS_LIMIT
+        
+        # Spectrum plot display preference - was previously only created lazily
+        # by the view layer (ControlPanelSidebar's __init__), which broke once
+        # SpectrumPlotContainer (constructed first, in main.py) started reading
+        # it directly for its own relocated log-scale checkbox (issue #39).
+        self.use_log_scale = False
         
         # Configuration presets for structural automated multi-run recordings
         self.batch_target_time = self.DEFAULT_BATCH_TARGET_TIME_S
@@ -136,7 +148,7 @@ class RIIDCoreService:
         self._heartbeat_task = None
 
         # ML inference model
-        self.ml_inference = MlInference(ml_model_name = ml_model_name, min_counts = 20)
+        self.ml_inference = MlInference(ml_model_name = ml_model_name, min_counts = self.DEFAULT_ML_MIN_COUNTS)
 
     def reinitialize_daq_handle(self):
         """Destroys any stale driver reference and instantiates a fresh one, transmitting
@@ -659,13 +671,25 @@ class RIIDCoreService:
         directly."""
         self.ml_inference.update_classification_threshold(new_threshold)
 
+    def set_ml_min_counts(self, new_min_counts: int):
+        """Passthrough to MlInference.update_min_counts() - the entry point
+        the GUI's "Min. Counts to Trigger ML" slider calls, so the view layer
+        doesn't need to reach into self.ml_inference directly. This controls
+        MlInference's OWN internal gate (minimum single-channel count, after
+        background subtraction, before it attempts classification at all) -
+        distinct from the old min_counts_trigger, which was a separate,
+        higher-level, whole-spectrum-total gate in this class that decided
+        whether _execute_ml_pipeline() got called at all, and has since been
+        removed entirely (inference is now always attempted every tick)."""
+        self.ml_inference.update_min_counts(int(new_min_counts))
+
     def set_ml_model(self, model_name: str) -> tuple:
         """Issue #67: swaps the active ML model at runtime (cnn_multilabel /
         cnn_deep). Reconstructs self.ml_inference with the new model, since
         MlInference doesn't support hot-swapping its underlying model file -
-        but carries the current background data and classification threshold
-        over to the new instance, so switching models doesn't silently reset
-        either of those.
+        but carries the current background data, classification threshold,
+        and minimum-counts trigger over to the new instance, so switching
+        models doesn't silently reset any of those.
         
         Only meaningful while idle - the model choice affects what
         _execute_ml_pipeline() returns (including the label SET itself, since
@@ -682,10 +706,11 @@ class RIIDCoreService:
         
         try:
             current_threshold = self.ml_inference.CLASSIFICATION_THRESHOLD
+            current_min_counts = self.ml_inference.get_min_counts()
             bg_live_time_s = float(self.bg_hardware_live_time_ms or 0.0) / 1000.0
             new_inference = MlInference(
                 ml_model_name=model_name,
-                min_counts=20,
+                min_counts=current_min_counts,
                 bkgnd_data=self.background_spectrum,
                 bkgnd_live_time=bg_live_time_s
             )
@@ -702,6 +727,48 @@ class RIIDCoreService:
         except Exception as e:
             logger.error(f"[SERVICE] Failed to switch ML model to '{model_name}': {e}", exc_info=True)
             return False, f"Failed to switch model: {e}"
+
+    def compute_background_subtracted_spectrum(self, spectrum_data: list, spectrum_live_time_s: float, bg_data: list, bg_live_time_s: float) -> list:
+        """Issue #39 ("Spectrum - Background" visualization template): reuses
+        MLPreprocessing.subtract_background() - the exact same background
+        subtraction step MlInference.inference_pipeline() runs before feeding
+        a spectrum to the model - instead of maintaining a second, separate
+        subtraction implementation in the view layer. This means the
+        visualization is a true representation of what the classifier itself
+        reasons over, and can't silently drift out of sync with the ML
+        pipeline's own subtraction behavior over time.
+        
+        A fresh MLPreprocessing instance is constructed per call - this is
+        cheap (it just stores a few int/float config values, no model loading
+        or I/O), unlike constructing a fresh MlInference.
+        
+        min_counts=0 (not the ML pipeline's own value of 20) - this call is
+        purely for display. The spectrum must stay visible even when the ML
+        pipeline itself declines to run inference due to insufficient counts;
+        min_counts here only controls a log warning inside subtract_background
+        about the subtraction being statistically unreliable, and that warning
+        shouldn't fire just because the operator is looking at a low-count
+        spectrum that isn't being classified yet.
+        
+        Args:
+            spectrum_data (list): Raw spectrum counts.
+            spectrum_live_time_s (float): Spectrum's live time, in SECONDS
+                (subtract_background expects seconds, unlike the hardware
+                timers elsewhere in this file which report milliseconds).
+            bg_data (list): Raw background counts.
+            bg_live_time_s (float): Background's live time, in SECONDS.
+        
+        Returns:
+            list: Background-subtracted spectrum, negative values clipped to
+            0. If no usable background is available, subtract_background
+            itself falls back to returning the raw spectrum unchanged.
+        """
+        preprocessor = MLPreprocessing(min_counts=0)
+        result = preprocessor.subtract_background(
+            spectrum_data=spectrum_data, spectrum_live_time=spectrum_live_time_s,
+            bkgnd_data=bg_data or [], bkgnd_live_time=bg_live_time_s
+        )
+        return result.tolist()
 
     def clear_cps_history(self):
         """Clears the count-rate plot's rolling history (issue #34's plot).

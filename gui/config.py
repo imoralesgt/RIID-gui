@@ -96,6 +96,7 @@ BRAND_COLORS = {
     "accent": "#878787",        # Metallic Grey (Structural outlines)
     "bg_workspace": "#EEF1F7",  # Soft Pearl White (Workspace background canvas)
     "crimson_trace": "#B9222D", # Trace crimson (Logarithmic counts chart color)
+    "subtracted_trace": "#ED692E", # IAEA secondary palette orange - the background-subtracted spectrum trace, distinct from the raw live spectrum (blue) and background (gray)
     
     # Centralized plot aesthetics keys to clean up hardcoded values
     "plot_grid": "#E5E7EB",     # Light Grey for canvas grid lines

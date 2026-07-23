@@ -40,7 +40,6 @@ class SpectrumRecordingPanel:
             
             # LEFT CARD: Source Table Library Configurations Mapping
             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3').style('width: 50%; border-color: #E2E8F0;'):
-                ui.markdown("📝 **Centralized Sources Matrix:** Link physical isotope sources utilizing persistent library records.").classes('text-xs text-zinc-600')
                 ui.label('Active Radiation Sources Directory').classes('text-xs font-bold mt-1').style(f"color: {BRAND_COLORS['primary']};")
                 
                 source_columns = [

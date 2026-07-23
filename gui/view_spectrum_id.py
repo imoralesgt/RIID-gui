@@ -28,12 +28,12 @@ class SpectrumPlotContainer:
             # Issue #67: was a static label, now a live model-switcher. Enabled
             # only while idle (see update_ui_elements) - switching models
             # mid-survey would produce a confusing mix of old/new-model results.
-            with ui.column().classes('flex-1 items-center justify-center p-3 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0;'):
+            with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
                 self.model_select = ui.select(
                     {'cnn_multilabel': 'cnn_multilabel', 'cnn_deep': 'cnn_deep'},
                     value=getattr(self.service, 'ml_model_name', 'cnn_multilabel'),
                     on_change=self.trigger_model_change
-                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0;')
+                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0; line-height: 1.2;')
                 ui.label('ML MODEL').classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         
         # ============ MAIN CONTENT: spectrum (left) + RIID results (right) ============
@@ -41,7 +41,32 @@ class SpectrumPlotContainer:
         # while the results panel still has enough width for the class
         # probability bars and count-rate plot.
         with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2'):
-            self.container = ui.column().classes('items-center justify-center rounded-lg border p-2 bg-white').style('width: 65%;')
+            with ui.column().classes('rounded-lg border bg-white p-2 gap-1').style('width: 65%; border-color: #E2E8F0;'):
+                with ui.row().classes('w-full justify-between items-center px-1 flex-wrap'):
+                    self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                    with ui.row().classes('items-center gap-3'):
+                        # Issue #39: lets the operator choose between the two
+                        # RadiaCode-style visualization templates - overlaid
+                        # background+spectrum traces (the existing default), or a
+                        # single background-subtracted spectrum trace. Two separate
+                        # buttons rather than a single ui.toggle, since each option
+                        # needs to show its own trace's color when active (blue for
+                        # the overlay mode, the new subtracted-trace orange for the
+                        # other) - Quasar's toggle component only supports one
+                        # uniform "selected" color across all its options.
+                        with ui.row().classes('items-center gap-1'):
+                            self.viz_mode_btn_overlay = ui.button('Background & Spectrum', on_click=lambda: self.trigger_viz_mode_change('overlay')) \
+                                .props('dense no-caps unelevated size=sm').classes('text-[10px]')
+                            self.viz_mode_btn_subtracted = ui.button('Spectrum - Background', on_click=lambda: self.trigger_viz_mode_change('subtracted')) \
+                                .props('dense no-caps unelevated size=sm').classes('text-[10px]')
+                        # Relocated from the Survey Control Console sidebar (issue
+                        # #39) - a small control here, next to the plot it affects,
+                        # matching the Count-rate card's Clear button placement.
+                        self.scale_checkbox = ui.checkbox(
+                            'Log-scale', value=getattr(self.service, 'use_log_scale', False),
+                            on_change=self.trigger_log_scale_change
+                        ).classes('text-xs text-zinc-600 font-medium')
+                self.container = ui.column().classes('items-center justify-center w-full')
             
             with ui.column().classes('gap-3').style('width: 35%;'):
                 with ui.column().classes('w-full p-3 rounded-lg border bg-white gap-2').style('border-color: #E2E8F0;'):
@@ -61,6 +86,13 @@ class SpectrumPlotContainer:
         
         self._build_class_probability_bars()
         
+        # Issue #39: 'overlay' (background+spectrum, both traces) or
+        # 'subtracted' (single background-subtracted spectrum trace) - set by
+        # the two buttons above, read by update_ui_elements to pick which
+        # trace(s) to build.
+        self.viz_mode = 'overlay'
+        self._update_viz_mode_buttons()
+        
         # Tracks the last state actually rendered into the spectrum plot, so the
         # heavy container.clear()+ui.plotly() redraw can be skipped when nothing is
         # actively being recorded and nothing has actually changed (issue #43).
@@ -77,9 +109,12 @@ class SpectrumPlotContainer:
 
     def _build_metric_card(self, label: str) -> ui.label:
         """Builds one of the top summary cards (issue #37) and returns its
-        value label so callers can update it directly."""
-        with ui.column().classes('flex-1 items-center justify-center p-3 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0;'):
-            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151;')
+        value label so callers can update it directly. Fixed height (issue
+        #67 follow-up) so all four cards in the row - including the ML Model
+        select, which has its own internal Quasar sizing quirks - line up
+        uniformly regardless of what each one's content naturally wants."""
+        with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
+            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151; line-height: 1.2;')
             ui.label(label.upper()).classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         return value_lbl
 
@@ -117,6 +152,41 @@ class SpectrumPlotContainer:
             ui.notify(msg, type="negative")
             self.model_select.set_value(self.service.ml_model_name)
 
+    def trigger_viz_mode_change(self, mode: str):
+        """Issue #39: switches between the two spectrum visualization
+        templates - 'overlay' (background+spectrum, both traces) or
+        'subtracted' (single background-subtracted trace)."""
+        logger.info(f"[USER_ACTION] Operator changed spectrum visualization mode -> {mode}")
+        self.viz_mode = mode
+        self._update_viz_mode_buttons()
+        self._last_render_signature = None  # force an immediate redraw
+        self.update_ui_elements()
+
+    def _update_viz_mode_buttons(self):
+        """Colors the active visualization-mode button to match its own
+        trace's color (blue for overlay, orange for subtracted - see
+        BRAND_COLORS['subtracted_trace']), and the inactive one as a plain
+        outline, so the selector visually previews what's about to be shown.
+        Also updates the card's own title to reflect the active mode."""
+        active_style = "color: #FFFFFF !important; font-weight: bold; border: none;"
+        inactive_style = "background-color: #FFFFFF !important; color: #4B5563 !important; border: 1px solid #D1D5DB !important; font-weight: normal;"
+        
+        if self.viz_mode == 'overlay':
+            self.viz_mode_btn_overlay.style(f"background-color: {BRAND_COLORS['primary']} !important; {active_style}")
+            self.viz_mode_btn_subtracted.style(inactive_style)
+            self.spectrum_card_title.set_text('Live spectrum')
+        else:
+            self.viz_mode_btn_overlay.style(inactive_style)
+            self.viz_mode_btn_subtracted.style(f"background-color: {BRAND_COLORS['subtracted_trace']} !important; {active_style}")
+            self.spectrum_card_title.set_text('Live spectrum (background subtracted)')
+
+    def trigger_log_scale_change(self, e):
+        """Issue #39: relocated here from the Survey Control Console sidebar,
+        as a small control on the Live Spectrum card itself."""
+        logger.info(f"[USER_ACTION] Operator modified counts scaling preference selection -> use_log_scale={e.value}")
+        self.service.use_log_scale = e.value
+        self._last_render_signature = None  # force an immediate redraw
+
     def update_ui_elements(self):
         """Master orchestrator driving dynamic component layers stacking order and layout configurations."""
         self._update_metric_cards()
@@ -126,7 +196,7 @@ class SpectrumPlotContainer:
         spectrum_data = self.service.live_spectrum
         bg_data = self.service.background_spectrum
         current_state = self.service.state
-        use_log = getattr(self.service, 'use_log_scale', True)
+        use_log = getattr(self.service, 'use_log_scale', False)
         
         # Issue #67: model switching is only meaningful while idle - switching
         # mid-survey would produce a confusing mix of old/new-model results.
@@ -149,6 +219,7 @@ class SpectrumPlotContainer:
             sum(bg_data) if bg_data else 0,
             bool(use_log),
             bool(getattr(self.service, 'survey_stopped_with_data', False)),
+            self.viz_mode,
         )
         
         if not is_actively_recording and render_signature == self._last_render_signature:
@@ -174,27 +245,41 @@ class SpectrumPlotContainer:
         energy_axis = self._get_energy_axis(num_channels)
         
         # 2. Lifecycle step: Calculate the active real-time CPS metrics directly from MCA timers
-        cps_val_string = "0.00"
+        cps_raw_value = 0.0
         if (current_state == 'ACQUIRING_SURVEY' or show_frozen_survey) and spectrum_data:
             total_cts = sum(spectrum_data)
             survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
             survey_secs = float(survey_ms / 1000.0)
             if survey_secs > 0.0:
-                cps_val_string = f"{float(total_cts / survey_secs):.2f}"
+                cps_raw_value = float(total_cts / survey_secs)
 
         # Initialize trace list matrix
         plotly_traces = []
         peak_y_value = 0.0
         
-        # 3. FIXED LAYER STACK: Append the live blue survey trace FIRST so it acts as the bottom layer
-        peak_y_value = self._append_live_survey_trace(
-            plotly_traces, energy_axis, spectrum_data, current_state, use_log, peak_y_value, num_channels, cps_val_string
-        )
-        
-        # 4. FIXED LAYER STACK: Append the environmental background trace SECOND to layer it on top
-        peak_y_value = self._append_background_trace(
-            plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels
-        )
+        if current_state == 'BG_RECORDING':
+            # Background capture in progress - always show its own live preview,
+            # regardless of the operator's overlay/subtracted preference (that
+            # choice only applies to the survey visualization, not to recording
+            # a fresh background).
+            peak_y_value = self._append_background_trace(
+                plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels
+            )
+        elif self.viz_mode == 'subtracted':
+            # Issue #39, visualization template 2: single background-subtracted trace.
+            peak_y_value = self._append_subtracted_trace(
+                plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels, cps_raw_value
+            )
+        else:
+            # Issue #39, visualization template 1 (default): both traces overlaid.
+            # 3. FIXED LAYER STACK: Append the live blue survey trace FIRST so it acts as the bottom layer
+            peak_y_value = self._append_live_survey_trace(
+                plotly_traces, energy_axis, spectrum_data, current_state, use_log, peak_y_value, num_channels, cps_raw_value
+            )
+            # 4. FIXED LAYER STACK: Append the environmental background trace SECOND to layer it on top
+            peak_y_value = self._append_background_trace(
+                plotly_traces, energy_axis, spectrum_data, bg_data, current_state, use_log, num_channels
+            )
         
         # 5. Modular calculations: Determine the fluid vertical chart display constraints
         y_axis_layout = self._calculate_y_axis_layout(use_log, peak_y_value)
@@ -202,14 +287,14 @@ class SpectrumPlotContainer:
         fig = {
             'data': plotly_traces,
             'layout': {
-                'xaxis': {'title': {'text': 'Energy (keV)', 'font': {'size': 10}}, 'automargin': True, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
+                'xaxis': {'title': {'text': 'Energy (keV)', 'font': {'size': 13}}, 'automargin': True, 'tickfont': {'size': 11}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
                 'yaxis': y_axis_layout,
                 'margin': {'l': 55, 'r': 20, 't': 15, 'b': 45}, 
                 'plot_bgcolor': BRAND_COLORS['plot_bg'], 
                 'paper_bgcolor': BRAND_COLORS['plot_paper'], 
                 'showlegend': True,
                 'barmode': 'overlay',
-                'legend': {'font': {'size': 8}, 'x': 0.70, 'y': 0.95, 'bgcolor': get_rgba_fill('legend_bg', alpha=0.7)},
+                'legend': {'font': {'size': 11}, 'x': 0.98, 'xanchor': 'right', 'y': 0.95, 'bgcolor': get_rgba_fill('legend_bg', alpha=0.7)},
                 'uirevision': self.PLOT_UIREVISION,
             }
         }
@@ -330,8 +415,8 @@ class SpectrumPlotContainer:
         fig = {
             'data': traces,
             'layout': {
-                'xaxis': {'title': {'text': 'Time (s)', 'font': {'size': 10}}, 'automargin': True, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
-                'yaxis': {'title': {'text': 'Count-rate (cps)', 'font': {'size': 10}}, 'automargin': True, 'tickfont': {'size': 8}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True, 'rangemode': 'tozero'},
+                'xaxis': {'title': {'text': 'Time (s)', 'font': {'size': 13}}, 'automargin': True, 'tickfont': {'size': 11}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True},
+                'yaxis': {'title': {'text': 'Count-rate (cps)', 'font': {'size': 13}}, 'automargin': True, 'tickfont': {'size': 11}, 'gridcolor': BRAND_COLORS['plot_grid'], 'autorange': True, 'rangemode': 'tozero'},
                 'margin': {'l': 50, 'r': 10, 't': 10, 'b': 40},
                 'plot_bgcolor': BRAND_COLORS['plot_bg'], 'paper_bgcolor': BRAND_COLORS['plot_paper'],
                 'showlegend': False,
@@ -363,6 +448,43 @@ class SpectrumPlotContainer:
         a2 = float(prof.get('calib_a2') if prof.get('calib_a2') is not None else 0.0)
         return [a0 + (a1 * ch) + (a2 * (ch ** 2)) for ch in range(num_channels)]
 
+    def _compute_normalized_background(self, bg_data: list, state: str, num_channels: int) -> tuple:
+        """Shared background time-normalization (issue #39): scales the
+        background spectrum's counts proportionally to match the current
+        survey's elapsed time - or reports it at its own raw reference
+        duration when there's no survey elapsed-time to normalize against
+        (e.g. fully idle with no survey ever run). Used by both the overlay
+        mode's separate background trace and the subtracted mode's single
+        trace, so this normalization math (and the frozen-survey fix it
+        needed) only has to live in one place.
+        
+        Returns:
+            (list | None, str): (scaled background counts matching
+            num_channels, or None if unavailable/length-mismatched; the
+            complete, ready-to-use trace name).
+        """
+        if not bg_data or len(bg_data) != num_channels:
+            return None, "Environmental Background"
+        
+        default_bg_ms = self.service.DEFAULT_BG_TARGET_TIME_S * 1000
+        bg_ms = float(getattr(self.service, 'bg_hardware_live_time_ms', default_bg_ms) or default_bg_ms)
+        # Normalize whenever there's a survey elapsed-time to normalize against -
+        # that includes the frozen "Last Survey (Stopped)" display, not just an
+        # actively-running one.
+        show_frozen_survey = getattr(self.service, 'survey_stopped_with_data', False)
+        if state == 'ACQUIRING_SURVEY' or show_frozen_survey:
+            survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
+            time_scaling_factor = float(survey_ms / bg_ms)
+            # Issue #39 follow-up: dropped the "(Normalized to Xs)" duration
+            # detail - the operator already sees the survey's live time via
+            # the other indicators (the LIVE TIME metric card, OP_STATE line).
+            label = "Normalized background"
+        else:
+            time_scaling_factor = 1.0
+            label = "Background"
+        
+        return [float(counts * time_scaling_factor) for counts in bg_data], label
+
     def _append_background_trace(self, traces: list, x_axis: list, spectrum_data: list, bg_data: list, state: str, use_log: bool, num_channels: int) -> float:
         """Calculates dynamic hardware-timed proportional background-scaling corrections and conditionally configures area shading layers."""
         peak_y = 0.0
@@ -372,30 +494,15 @@ class SpectrumPlotContainer:
         if state == 'BG_RECORDING' and spectrum_data:
             target_raw_y = spectrum_data
             trace_name = "Recording Live Background..."
-        elif bg_data and len(bg_data) == num_channels:
-            default_bg_ms = self.service.DEFAULT_BG_TARGET_TIME_S * 1000
-            bg_ms = float(getattr(self.service, 'bg_hardware_live_time_ms', default_bg_ms) or default_bg_ms)
-            # Normalize whenever there's a survey elapsed-time to normalize against -
-            # that includes the frozen "Last Survey (Stopped)" display, not just an
-            # actively-running one. Previously this only checked ACQUIRING_SURVEY,
-            # so pressing STOP silently fell back to the unscaled 300s-reference
-            # background, producing a wildly mismatched amplitude against the still-
-            # normalized-looking frozen survey trace right next to it.
-            show_frozen_survey = getattr(self.service, 'survey_stopped_with_data', False)
-            if state == 'ACQUIRING_SURVEY' or show_frozen_survey:
-                survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
-                time_scaling_factor = float(survey_ms / bg_ms)
-                trace_name = f"Background (Normalized to {survey_ms/1000:.1f}s)"
-            else:
-                time_scaling_factor = 1.0
-                trace_name = f"Background ({bg_ms/1000:.1f}s Reference)"
-                
-            raw_scaled_bg = [float(counts * time_scaling_factor) for counts in bg_data]
-            target_raw_y = raw_scaled_bg
+        else:
+            scaled_bg, label = self._compute_normalized_background(bg_data, state, num_channels)
+            if scaled_bg is not None:
+                target_raw_y = scaled_bg
+                trace_name = label  # already the complete, ready-to-use trace name
 
         if target_raw_y is not None and len(target_raw_y) == num_channels:
             peak_y = float(max(target_raw_y)) if target_raw_y else 0.0
-            processed_bg_y = [v if v > 0 else 0.1 for v in target_raw_y] if use_log else target_raw_y
+            processed_bg_y = [v if v >= 1 else 1 for v in target_raw_y] if use_log else target_raw_y
             
             if use_log:
                 # FIXED MODIFICATION: Remove background area shade completely when in log scale
@@ -425,7 +532,51 @@ class SpectrumPlotContainer:
             
         return peak_y
 
-    def _append_live_survey_trace(self, traces: list, x_axis: list, spectrum_data: list, state: str, use_log: bool, current_peak_y: float, num_channels: int, cps_string: str) -> float:
+    @staticmethod
+    def _format_cps(value: float) -> str:
+        """Formats a count-rate for the live-survey / live-survey-minus-
+        background spectrum plot legends: 'cps' below 1000, 'kcps' at or
+        above 1000, always showing exactly 4 significant digits regardless of
+        magnitude (e.g. 79.83 cps, 5.456 cps, 1.235 kcps, 12.35 kcps).
+        
+        Does NOT use Python's '%.4g' format directly - for values >= 10000 that
+        would switch to scientific notation (e.g. '1.235e+04'), which isn't
+        wanted here. Computing the decimal count explicitly from the value's
+        own magnitude keeps the output as a plain, fixed-point number in
+        every case.
+        """
+        value = max(0.0, float(value))
+
+        def sig_figs(v: float) -> str:
+            if v == 0:
+                return "0.000"
+            magnitude = int(math.floor(math.log10(abs(v)))) + 1
+            decimals = max(0, 4 - magnitude)
+            formatted = f"{v:.{decimals}f}"
+            # Rounding can push the value up a full order of magnitude (e.g.
+            # 999.96 at 1 decimal -> "1000.0", or 0.99996 at 4 decimals ->
+            # "1.0000") - that leaves one extra digit, so redo with one fewer
+            # decimal to keep exactly 4 significant figures.
+            rounded = float(formatted)
+            new_magnitude = int(math.floor(math.log10(abs(rounded)))) + 1 if rounded != 0 else magnitude
+            if new_magnitude > magnitude:
+                decimals = max(0, decimals - 1)
+                formatted = f"{v:.{decimals}f}"
+            return formatted
+
+        if value >= 1000:
+            return f"{sig_figs(value / 1000.0)} kcps"
+
+        formatted = sig_figs(value)
+        # Edge case: rounding up (e.g. 999.96 -> "1000.0") can push the
+        # displayed value across the kcps threshold even though the raw value
+        # was just under it - recheck against the ROUNDED value so the unit
+        # shown always matches what's actually displayed.
+        if float(formatted) >= 1000:
+            return f"{sig_figs(value / 1000.0)} kcps"
+        return f"{formatted} cps"
+
+    def _append_live_survey_trace(self, traces: list, x_axis: list, spectrum_data: list, state: str, use_log: bool, current_peak_y: float, num_channels: int, cps_value: float) -> float:
         """Applies safe log filters and overlays the main active survey line with integrated label CPS readouts and scale-dependent shading."""
         peak_y = current_peak_y
         
@@ -435,13 +586,13 @@ class SpectrumPlotContainer:
             if live_max > peak_y:
                 peak_y = live_max
                 
-            processed_live_y = [val if val > 0 else 0.1 for val in spectrum_data] if use_log else spectrum_data
+            processed_live_y = [val if val >= 1 else 1 for val in spectrum_data] if use_log else spectrum_data
             
             # FIXED: Dynamically embed the current CPS metrics straight into the plot trace name label string
             if state == 'ACQUIRING_SURVEY':
-                legend_label_name = f"Live Survey Session ({cps_string} CPS)"
+                legend_label_name = f"Live Survey ({self._format_cps(cps_value)})"
             else:
-                legend_label_name = f"Last Survey (Stopped, {cps_string} CPS)"
+                legend_label_name = f"Last Survey (Stopped, {self._format_cps(cps_value)})"
             
             if use_log:
                 # FIXED MODIFICATION: No area shading fill is added under the curve when in log scale
@@ -473,8 +624,70 @@ class SpectrumPlotContainer:
             
         return peak_y
 
-
-
+    def _append_subtracted_trace(self, traces: list, x_axis: list, spectrum_data: list, bg_data: list, state: str, use_log: bool, num_channels: int, cps_value: float) -> float:
+        """Issue #39, visualization template 2: a single trace showing the live
+        spectrum with the background subtracted out, matching the RadiaCode
+        app's "Spectrum with subtracted background" template - as opposed to
+        the default 'overlay' mode, which shows both traces separately on top
+        of each other.
+        
+        The actual subtraction is delegated to
+        RIIDCoreService.compute_background_subtracted_spectrum(), which reuses
+        MLPreprocessing.subtract_background() - the exact same step
+        MlInference.inference_pipeline() runs before feeding a spectrum to the
+        model - rather than maintaining a second, separate implementation
+        here that could silently drift out of sync with what the classifier
+        itself actually reasons over."""
+        peak_y = 0.0
+        if not (spectrum_data and len(spectrum_data) == num_channels):
+            return peak_y
+        if not (state == 'ACQUIRING_SURVEY' or getattr(self.service, 'survey_stopped_with_data', False)):
+            return peak_y
+        
+        survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
+        default_bg_ms = self.service.DEFAULT_BG_TARGET_TIME_S * 1000
+        bg_ms = float(getattr(self.service, 'bg_hardware_live_time_ms', default_bg_ms) or default_bg_ms)
+        
+        subtracted = self.service.compute_background_subtracted_spectrum(
+            spectrum_data=spectrum_data, spectrum_live_time_s=survey_ms / 1000.0,
+            bg_data=bg_data, bg_live_time_s=bg_ms / 1000.0
+        )
+        
+        has_background = bool(bg_data) and len(bg_data) > 0
+        if has_background:
+            # Issue #39 follow-up: the legend's count-rate is the NET
+            # (subtracted) rate - total count-rate minus the background's own
+            # rate - not the raw total rate (which is what cps_value, passed
+            # in from update_ui_elements, represents and is used for the
+            # overlay mode's "Live Survey" label instead). Clipped to >= 0:
+            # with few counts (e.g. early in a survey), statistical noise can
+            # momentarily make the background's own rate exceed the survey's,
+            # which would otherwise show a nonsensical negative count-rate.
+            survey_secs = survey_ms / 1000.0
+            bg_secs = bg_ms / 1000.0
+            raw_cps = float(sum(spectrum_data)) / survey_secs if survey_secs > 0 else 0.0
+            bg_cps = float(sum(bg_data)) / bg_secs if bg_secs > 0 else 0.0
+            net_cps = max(0.0, raw_cps - bg_cps)
+            trace_name = f"Live survey, no bkg. ({self._format_cps(net_cps)})"
+        else:
+            # subtract_background() itself falls back to the raw spectrum when
+            # there's nothing usable to subtract - name the trace accordingly.
+            trace_name = f"Live Survey Session ({self._format_cps(cps_value)}) - no background to subtract"
+        
+        peak_y = float(max(subtracted)) if subtracted else 0.0
+        processed_y = [v if v >= 1 else 1 for v in subtracted] if use_log else subtracted
+        
+        trace = {
+            'x': x_axis, 'y': processed_y, 'type': 'scatter', 'mode': 'lines',
+            'name': trace_name,
+            'line': {'color': BRAND_COLORS['subtracted_trace'], 'width': 1.8},
+        }
+        if not use_log:
+            trace['fill'] = 'tozeroy'
+            trace['fillcolor'] = get_rgba_fill('subtracted_trace')
+        traces.append(trace)
+        
+        return peak_y
 
     def _calculate_y_axis_layout(self, use_log: bool, peak_y_value: float) -> dict:
         """Configures a pure native Plotly auto-scaling layout box format preventing integer compression."""
@@ -484,10 +697,10 @@ class SpectrumPlotContainer:
             # FIXED: Bypasses manual calculation limits. Leverages native Plotly autorange tracking 
             # while binding strict formatting rules to force base-10 power of ten index grid lines.
             return {
-                'title': {'text': axis_title_string, 'font': {'size': 10}},
+                'title': {'text': axis_title_string, 'font': {'size': 13}},
                 'automargin': True,
                 'type': 'log',
-                'tickfont': {'size': 8},
+                'tickfont': {'size': 11},
                 'gridcolor': BRAND_COLORS['plot_grid'],
                 
                 # Grants Plotly absolute native freedom to expand ceilings dynamically past 100, 1000, or higher
@@ -505,10 +718,10 @@ class SpectrumPlotContainer:
         else:
             # Linear scale continue to run on native automatic scaling properties
             return {
-                'title': {'text': axis_title_string, 'font': {'size': 10}},
+                'title': {'text': axis_title_string, 'font': {'size': 13}},
                 'automargin': True,
                 'type': 'linear',
-                'tickfont': {'size': 8},
+                'tickfont': {'size': 11},
                 'gridcolor': BRAND_COLORS['plot_grid'],
                 'autorange': True
             }
@@ -518,15 +731,14 @@ class ControlPanelSidebar:
     def __init__(self, service, plot_container: SpectrumPlotContainer):
         self.service = service
         self.plot_container = plot_container
-        if not hasattr(self.service, 'use_log_scale'):
-            self.service.use_log_scale = False
         self._assemble_ui()
 
     def _assemble_ui(self):
-        with ui.column().classes('w-full gap-4 text-slate-200'):
-            ui.label('Survey Control Console').classes('text-xs font-bold text-zinc-400 uppercase tracking-widest border-b pb-1 w-full border-zinc-700')
+        with ui.column().classes('w-full gap-4'):
+            ui.label('Survey Control Console').classes('text-xs font-bold uppercase tracking-widest border-b pb-1 w-full').style(f"color: {BRAND_COLORS['primary']}; border-color: #E2E8F0;")
             
-            with ui.column().classes('w-full gap-2 bg-zinc-800 p-3 rounded-md border border-zinc-700 shadow-inner'):
+            with ui.column().classes('w-full gap-2 bg-slate-50 p-3 rounded-md border shadow-inner').style('border-color: #E2E8F0;'):
+                ui.label('ML Pipeline Settings').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-wide')
                 # Issue #67: replaces the old "ML Detection Threshold (cts)"
                 # counts-based numeric input, in this exact sidebar slot, with
                 # a confidence-based slider (50%-99.9%) controlling
@@ -537,36 +749,67 @@ class ControlPanelSidebar:
                 # has been removed entirely - inference is now always attempted,
                 # relying on MlInference's own internal not-enough-counts check.
                 initial_threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
-                self.threshold_label = ui.label(f"Detection Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-300')
+                self.threshold_label = ui.label(f"Detection Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-700')
                 self.threshold_slider = ui.slider(
                     min=0.50, max=0.999, step=0.001, value=initial_threshold,
                     on_change=self.trigger_threshold_change
                 ).props('color=primary').classes('w-full')
                 
-                self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
+                # Controls MlInference's own internal gate (see
+                # set_ml_min_counts's docstring for how this differs from the
+                # removed min_counts_trigger) - the minimum peak count in a
+                # single channel, after background subtraction, before the ML
+                # pipeline attempts classification at all rather than
+                # returning "not enough counts".
+                initial_min_counts = self.service.ml_inference.get_min_counts()
+                self.min_counts_label = ui.label(f"Min. Counts to Trigger ML ({initial_min_counts} cts)").classes('text-xs text-zinc-700')
+                self.min_counts_slider = ui.slider(
+                    min=1, max=200, step=1, value=initial_min_counts,
+                    on_change=self.trigger_min_counts_change
+                ).props('color=primary').classes('w-full')
                 
-                self.scale_checkbox = ui.checkbox(
-                    'Log-scale', 
-                    value=self.service.use_log_scale,
-                    on_change=lambda e: self._toggle_plot_scale(e.value)
-                ).classes('text-xs text-zinc-300 font-medium mt-1')
+                self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs').props('dense outlined')
 
-            with ui.column().classes('w-full p-3 bg-black border border-zinc-800 rounded-md gap-1 font-mono text-xs text-emerald-400'):
-                self.status_lbl = ui.label('SYSTEM: Syncing...')
-                self.bg_status_lbl = ui.label('BACKGROUND: Missing Profile')
+            # ============ LIVE SURVEY (primary workflow) ============
+            # Directly below ML Pipeline Settings now that the diagnostic
+            # console has moved to a collapsed panel at the bottom - these are
+            # the two things an operator actually touches during a normal
+            # survey, so they sit together at the top of the card.
+            with ui.column().classes('w-full gap-2 bg-slate-50 p-3 rounded-md border shadow-inner').style('border-color: #E2E8F0;'):
+                ui.label('Live Survey').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-wide')
+                
+                # Shown instead of the controls below when no background exists
+                # yet - a survey can't meaningfully start without one anyway
+                # (see play_stop_btn's existing has_bg gate), so this makes
+                # that requirement explicit rather than just leaving an empty
+                # gap where the buttons would be.
+                self.no_bg_message = ui.label("Load/record background to start").classes('text-xs text-zinc-500 italic text-center w-full py-2')
+                self.no_bg_message.set_visibility(False)
+                
+                with ui.row().classes('w-full gap-2 no-wrap pt-1') as self.live_survey_controls_row:
+                    self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
+                    self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
+                    self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
+                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
+
+                # Issue #41: bundles the last spectrum shown here with the current
+                # background into a downloadable .zip (both in .json and .spe).
+                # Visible only once a background has settled (see refresh_widget_states).
+                self.download_riid_btn = ui.button('Download Spectrum', icon='download', on_click=self.trigger_download_riid)
+                self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full mt-1 py-1.5 text-xs')
 
             # ============ BACKGROUND SPECTRUM (collapsible) ============
             # Recording/loading/storing a background is a secondary, occasional
             # workflow compared to running a live survey - grouping it into a
             # single collapsed-by-default panel keeps it one click away without
-            # competing for attention with the always-visible Live Survey
-            # controls below. Auto-expands while a capture is actively running
-            # (see refresh_widget_states) so its progress bar stays visible.
-            with ui.expansion('Background Spectrum', icon='security', value=False) \
-                    .classes('w-full bg-zinc-800 border border-zinc-700 rounded-md') \
-                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-300"') as self.bg_expansion:
+            # competing for attention with the Live Survey card above.
+            # Auto-expands while a capture is actively running (see
+            # refresh_widget_states) so its progress bar stays visible.
+            with ui.expansion('Background Spectrum', icon='ssid_chart', value=False) \
+                    .classes('w-full bg-slate-50 border rounded-md').style('border-color: #E2E8F0;') \
+                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-700"') as self.bg_expansion:
                 with ui.column().classes('w-full gap-2 p-2'):
-                    self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
+                    self.bg_time_input = ui.number('BG Record Time (s)', value=self.service.bg_target_time, format='%d').classes('w-full text-xs').props('dense outlined')
 
                     self.bg_progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 rounded transition-all').props('color=amber')
                     self.bg_progress_bar.set_visibility(False)
@@ -574,20 +817,20 @@ class ControlPanelSidebar:
                     self.bg_btn = ui.button('RECORD BACKGROUND SPECTRUM', icon='security', on_click=self.trigger_bg)
                     self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
 
-                    ui.separator().classes('bg-zinc-700')
+                    ui.separator().classes('bg-gray-200')
 
                     # Issue #44: lets the operator load an already-saved background
                     # (see issue #45) instead of recording a fresh one. Purely
                     # additive - the RECORD flow above is completely untouched.
                     with ui.column().classes('w-full gap-1') as self.load_bg_group:
                         with ui.row().classes('w-full gap-2 items-end'):
-                            self.bg_file_select = ui.select(options=[], label='Load Pre-Recorded Background').props('dense outlined dark').classes('flex-1 text-xs')
-                            ui.button(icon='refresh', on_click=self.refresh_bg_file_list).props('dense flat round').classes('text-zinc-300')
+                            self.bg_file_select = ui.select(options=[], label='Load Pre-Recorded Background').props('dense outlined').classes('flex-1 text-xs')
+                            ui.button(icon='refresh', on_click=self.refresh_bg_file_list).props('dense flat round').classes('text-zinc-600')
                         self.load_bg_btn = ui.button('LOAD SELECTED BACKGROUND', icon='folder_open', on_click=self.trigger_load_bg)
                         self.load_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
                     self.refresh_bg_file_list()
 
-                    ui.separator().classes('bg-zinc-700')
+                    ui.separator().classes('bg-gray-200')
 
                     # Issue #45: lets the operator persist the latest recorded
                     # background spectrum to disk (data/spectra/background/),
@@ -598,23 +841,18 @@ class ControlPanelSidebar:
                     self.save_bg_btn = ui.button('Store Background Spectrum', icon='save', on_click=self.open_save_bg_dialog)
                     self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
 
-            # ============ LIVE SURVEY (always visible - primary workflow) ============
-            ui.label('Live Survey').classes('text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-1')
-            with ui.row().classes('w-full gap-2 no-wrap pt-1'):
-                self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
-                self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
-                self.clear_btn = ui.button('CLEAR', icon='delete_sweep', on_click=self.trigger_clear)
-                self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
-
-            # Issue #41: bundles the last spectrum shown here with the current
-            # background into a downloadable .zip (both in .json and .spe).
-            # Visible only once a background has settled (see refresh_widget_states).
-            self.download_riid_btn = ui.button('Download Spectrum', icon='download', on_click=self.trigger_download_riid)
-            self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full mt-1 py-1.5 text-xs')
-
-    def _toggle_plot_scale(self, value: bool):
-        logger.info(f"[USER_ACTION] Operator modified counts scaling preference selection -> use_log_scale={value}")
-        self.service.use_log_scale = value
+            # ============ SYSTEM CONSOLE (collapsible, closed by default) ============
+            # Raw status readout - moved to the bottom and collapsed by default,
+            # since it's diagnostic information the operator only needs to check
+            # occasionally, not something that should compete for space with the
+            # actual controls above. Light-themed now like the rest of the
+            # sidebar, rather than the dark/terminal look it had before.
+            with ui.expansion('System Console', icon='terminal', value=False) \
+                    .classes('w-full bg-slate-50 border rounded-md').style('border-color: #E2E8F0;') \
+                    .props('dense expand-separator header-class="text-xs font-bold text-zinc-700"'):
+                with ui.column().classes('w-full gap-1 p-2 font-mono text-xs text-zinc-700'):
+                    self.status_lbl = ui.label('SYSTEM: Syncing...')
+                    self.bg_status_lbl = ui.label('BACKGROUND: Missing Profile')
 
     def trigger_threshold_change(self, e):
         """Issue #67: updates the multi-label classification threshold live
@@ -624,6 +862,14 @@ class ControlPanelSidebar:
         new_threshold = float(e.value)
         self.threshold_label.set_text(f"Detection Threshold ({new_threshold * 100:.1f}%)")
         self.service.set_ml_classification_threshold(new_threshold)
+
+    def trigger_min_counts_change(self, e):
+        """Updates MlInference's minimum single-channel count required to
+        attempt classification, live as the slider moves - same not-gated-to-
+        idle reasoning as the threshold slider above."""
+        new_min_counts = int(e.value)
+        self.min_counts_label.set_text(f"Min. Counts to Trigger ML ({new_min_counts} cts)")
+        self.service.set_ml_min_counts(new_min_counts)
 
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
@@ -707,7 +953,7 @@ class ControlPanelSidebar:
         self.service.stop_execution()
 
     def trigger_clear(self):
-        logger.warning("[USER_ACTION] Operator clicked CLEAR button - wiping accumulated survey spectrum (background preserved).")
+        logger.warning("[USER_ACTION] Operator clicked RESTART button - wiping accumulated survey spectrum (background preserved).")
         self.service.clear_survey_data()
 
     def trigger_download_riid(self):
@@ -740,17 +986,31 @@ class ControlPanelSidebar:
             # FIXED: Formally display the calculated hardware CPS metric on the panel view label
             self.status_lbl.set_text(
                 f"OP_STATE: SURVEY ACTIVE | TIME: {survey_seconds:.1f}s | "
-                f"COUNTS: {total_counts} | RATE: {cps_rate:.2f} CPS"
+                f"COUNTS: {total_counts} | RATE: {cps_rate:.2f} cps"
             )
         else:
             self.status_lbl.set_text(f"OP_STATE: {self.service.status_text.upper()}")
 
         if has_bg:
             self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: CALIBRATED (READY)")
-            self.bg_status_lbl.style("color: #34D399;")
+            self.bg_status_lbl.style("color: #047857;")
         else:
             self.bg_status_lbl.set_text("BACKGROUND SPECTRUM: ABSENT (LOCKED)")
-            self.bg_status_lbl.style("color: #F87171;")
+            self.bg_status_lbl.style("color: #B91C1C;")
+
+        # Nudges a first-time (or otherwise background-less) operator toward
+        # recording one: a gentle pulsing orange border on the panel itself,
+        # using Tailwind's built-in animate-pulse - no custom CSS/JS, and
+        # since the panel is collapsed by default, only its header row is
+        # visible while pulsing, so this stays subtle rather than flickering
+        # a large area. Off during an active BG capture (the panel already
+        # auto-expands then, so the cue would be redundant) and off as soon
+        # as a background exists.
+        needs_bg_highlight = not has_bg and not is_bg_running
+        if needs_bg_highlight:
+            self.bg_expansion.classes(add='border-2 animate-pulse').style(f"border-color: {BRAND_COLORS['subtracted_trace']};")
+        else:
+            self.bg_expansion.classes(remove='border-2 animate-pulse').style('border-color: #E2E8F0;')
 
         # Hide the entire panel during a live survey - simpler than showing the
         # BG collection time as a disabled field. Visible in every other state
@@ -820,3 +1080,13 @@ class ControlPanelSidebar:
         # first; it's hidden only during BG recording / batch runs where clearing
         # would be ambiguous or unsafe.
         self.clear_btn.set_visibility(is_idle or is_survey_running)
+
+        # Replaces the controls entirely with an explicit message when idle
+        # with no background recorded yet - a survey can't meaningfully start
+        # in that state anyway (play_stop_btn's own gate above already
+        # prevents it), so this makes the reason obvious instead of just
+        # leaving START invisible with no explanation. download_riid_btn is
+        # already hidden in this case by its own has_bg gate a few lines up.
+        show_no_bg_message = is_idle and not has_bg
+        self.no_bg_message.set_visibility(show_no_bg_message)
+        self.live_survey_controls_row.set_visibility(not show_no_bg_message)

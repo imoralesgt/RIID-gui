@@ -13,12 +13,11 @@ class HardwareCalibrationPanel:
         self.render_layout()
 
     def render_layout(self):
-        ui.markdown("⚙️ **Non-Volatile Instrument Profiles:** Calibration committed to records.").classes('text-xs text-zinc-600 q-mb-xs')
         with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
             with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
                 with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3'):
                     with ui.row().classes('w-full gap-3 items-center'):
-                        self.sn_badge = ui.label(f"Base S/N: {self.system.serial_number}").classes('text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded border')
+                        self.sn_badge = ui.label(f"MCA serial number: {self.system.serial_number}").classes('text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded border')
                         
                         self.sys_id_input = ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', HARDWARE_DEFAULTS['SYS-ID']), 
                                                      on_change=lambda e: self.system.hw_profile.update({'SYS-ID': e.value})).props('dense outlined').classes('w-28 text-xs')
@@ -83,7 +82,7 @@ class HardwareCalibrationPanel:
         
         logger.warning(f"[CALIB_PANEL] Refreshed input fields matrix explicitly to match S/N: {current_sn}")
         self.last_bound_serial = current_sn
-        self.sn_badge.set_text(f"Base S/N: {current_sn}")
+        self.sn_badge.set_text(f"MCA serial number: {current_sn}")
         
         self.sys_id_input.set_value(prof.get('SYS-ID', HARDWARE_DEFAULTS['SYS-ID']))
         self.analyzer_name_input.set_value(prof.get('Analyzer name', HARDWARE_DEFAULTS['Analyzer name']))
