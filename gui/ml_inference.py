@@ -22,6 +22,7 @@ class MlInference:
         'coeu'  : 'Co-60_Eu-152',
         'cs'    : 'Cs-137',
         'csco'  : 'Cs-137_Co-60',
+        'cscoeu': 'Cs-137_Co-60_Eu-152',
         'cseu'  : 'Cs-137_Eu-152',
         'eu'    : 'Eu-152',
         'u'     : 'U-nat',
@@ -239,7 +240,20 @@ class MlInference:
             CLASSIFICATION_THRESHOLD. Callers wanting only the "detected"
             subset should filter this themselves using CLASSIFICATION_THRESHOLD.
         """
-        return {labels[i] : float(p) for i, p in enumerate(probabilities)}
+        if len(probabilities) != len(labels):
+            logger.error(
+                f"ML model output has {len(probabilities)} classes, but "
+                f"{len(labels)} labels are configured for it in MODEL_LABELS - "
+                f"these must match. Update the label dictionary to reflect the "
+                f"model's actual output layer. Continuing with whichever is "
+                f"shorter rather than crashing, but the result below is "
+                f"incomplete/misleading until this is fixed."
+            )
+        # zip() stops at the shorter of the two - safely handles the model
+        # returning either MORE probabilities than labels (extras silently
+        # dropped) or FEWER (trailing labels never appear in the result),
+        # instead of raising IndexError like labels[i] via enumerate() did.
+        return {label: float(p) for label, p in zip(labels, probabilities)}
 
     def inference_pipeline(self,
                 spectrum_data : list[int],

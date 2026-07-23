@@ -25,8 +25,16 @@ class SpectrumPlotContainer:
             self.metric_isotopes_val = self._build_metric_card('Detected Isotopes')
             self.metric_confidence_val = self._build_metric_card('Avg Confidence')
             self.metric_livetime_val = self._build_metric_card('Live Time')
-            self.metric_model_val = self._build_metric_card('ML Model')
-        self.metric_model_val.set_text(getattr(self.service, 'ml_model_name', 'UNKNOWN'))
+            # Issue #67: was a static label, now a live model-switcher. Enabled
+            # only while idle (see update_ui_elements) - switching models
+            # mid-survey would produce a confusing mix of old/new-model results.
+            with ui.column().classes('flex-1 items-center justify-center p-3 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0;'):
+                self.model_select = ui.select(
+                    {'cnn_multilabel': 'cnn_multilabel', 'cnn_deep': 'cnn_deep'},
+                    value=getattr(self.service, 'ml_model_name', 'cnn_multilabel'),
+                    on_change=self.trigger_model_change
+                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0;')
+                ui.label('ML MODEL').classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         
         # ============ MAIN CONTENT: spectrum (left) + RIID results (right) ============
         # 65/35 split (was 50/50) - the spectrum reads better with more room,
@@ -76,12 +84,15 @@ class SpectrumPlotContainer:
         return value_lbl
 
     def _build_class_probability_bars(self):
-        """Pre-builds one row (name + percentage + progress bar) per class the
+        """(Re)builds one row (name + percentage + progress bar) per class the
         active ML model can output, in the model's own label order - matches
-        the screenshot's Background/Co-60/Cs-137/Eu-152/U-nat ordering for the
-        multi-label model. Built once; update_ui_elements only updates values
-        from here on, so this never needs a blink-prone teardown/rebuild."""
+        the reference screenshot's Background/Co-60/Cs-137/Eu-152/U-nat
+        ordering for the multilabel model. Called once at construction, and
+        again by trigger_model_change (issue #67) whenever the operator
+        switches models - cnn_deep and cnn_multilabel have different label
+        sets (8 vs 5 classes), so the bars can't just be updated in place."""
         self.class_prob_bars = {}
+        self.class_prob_container.clear()
         labels = list(self.service.ml_inference.get_isotope_labels().values())
         with self.class_prob_container:
             for label in labels:
@@ -91,6 +102,20 @@ class SpectrumPlotContainer:
                         val_lbl = ui.label('0.0%').classes('text-[11px] font-bold text-zinc-500')
                     bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-2 rounded').props('color=grey-4')
                 self.class_prob_bars[label] = (val_lbl, bar)
+
+    def trigger_model_change(self, e):
+        """Issue #67: switches the active ML model. Rebuilds the class
+        probability bars for the new model's label set on success, or reverts
+        the dropdown to whatever's actually active if the switch failed."""
+        new_model = e.value
+        logger.warning(f"[USER_ACTION] Operator changed ML model selection to '{new_model}'.")
+        ok, msg = self.service.set_ml_model(new_model)
+        if ok:
+            ui.notify(msg, type="positive")
+            self._build_class_probability_bars()
+        else:
+            ui.notify(msg, type="negative")
+            self.model_select.set_value(self.service.ml_model_name)
 
     def update_ui_elements(self):
         """Master orchestrator driving dynamic component layers stacking order and layout configurations."""
@@ -102,6 +127,13 @@ class SpectrumPlotContainer:
         bg_data = self.service.background_spectrum
         current_state = self.service.state
         use_log = getattr(self.service, 'use_log_scale', True)
+        
+        # Issue #67: model switching is only meaningful while idle - switching
+        # mid-survey would produce a confusing mix of old/new-model results.
+        if current_state == 'IDLE':
+            self.model_select.enable()
+        else:
+            self.model_select.disable()
         
         is_actively_recording = current_state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
         
@@ -341,7 +373,8 @@ class SpectrumPlotContainer:
             target_raw_y = spectrum_data
             trace_name = "Recording Live Background..."
         elif bg_data and len(bg_data) == num_channels:
-            bg_ms = float(getattr(self.service, 'bg_hardware_live_time_ms', 30000.0) or 30000.0)
+            default_bg_ms = self.service.DEFAULT_BG_TARGET_TIME_S * 1000
+            bg_ms = float(getattr(self.service, 'bg_hardware_live_time_ms', default_bg_ms) or default_bg_ms)
             # Normalize whenever there's a survey elapsed-time to normalize against -
             # that includes the frozen "Last Survey (Stopped)" display, not just an
             # actively-running one. Previously this only checked ACQUIRING_SURVEY,
@@ -494,7 +527,22 @@ class ControlPanelSidebar:
             ui.label('Survey Control Console').classes('text-xs font-bold text-zinc-400 uppercase tracking-widest border-b pb-1 w-full border-zinc-700')
             
             with ui.column().classes('w-full gap-2 bg-zinc-800 p-3 rounded-md border border-zinc-700 shadow-inner'):
-                self.min_cnt_input = ui.number('ML Detection Threshold (cts)', value=self.service.min_counts_trigger, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
+                # Issue #67: replaces the old "ML Detection Threshold (cts)"
+                # counts-based numeric input, in this exact sidebar slot, with
+                # a confidence-based slider (50%-99.9%) controlling
+                # MlInference.CLASSIFICATION_THRESHOLD - the per-class
+                # probability a detection must exceed to count as "detected".
+                # This is unrelated to the old min_counts_trigger gate (whether
+                # enough raw counts exist to attempt inference at all), which
+                # has been removed entirely - inference is now always attempted,
+                # relying on MlInference's own internal not-enough-counts check.
+                initial_threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
+                self.threshold_label = ui.label(f"Detection Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-300')
+                self.threshold_slider = ui.slider(
+                    min=0.50, max=0.999, step=0.001, value=initial_threshold,
+                    on_change=self.trigger_threshold_change
+                ).props('color=primary').classes('w-full')
+                
                 self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs text-white').props('dark dense outlined')
                 
                 self.scale_checkbox = ui.checkbox(
@@ -568,9 +616,18 @@ class ControlPanelSidebar:
         logger.info(f"[USER_ACTION] Operator modified counts scaling preference selection -> use_log_scale={value}")
         self.service.use_log_scale = value
 
+    def trigger_threshold_change(self, e):
+        """Issue #67: updates the multi-label classification threshold live
+        as the slider moves - unlike the model dropdown, this is not gated to
+        idle-only, since adjusting sensitivity on the fly during an active
+        survey is a reasonable, useful thing to do."""
+        new_threshold = float(e.value)
+        self.threshold_label.set_text(f"Detection Threshold ({new_threshold * 100:.1f}%)")
+        self.service.set_ml_classification_threshold(new_threshold)
+
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
-        self.service.start_background_recording(int(self.bg_time_input.value or 30))
+        self.service.start_background_recording(int(self.bg_time_input.value or self.service.DEFAULT_BG_TARGET_TIME_S))
 
     def refresh_bg_file_list(self):
         """Repopulates the load-background dropdown from whatever's currently
@@ -641,9 +698,8 @@ class ControlPanelSidebar:
             self.trigger_stop()
 
     def trigger_start(self):
-        logger.warning(f"[USER_ACTION] Operator clicked START continuous survey. trigger={self.min_cnt_input.value} cts | reset={self.max_cnt_input.value} cts")
-        self.service.min_counts_trigger = int(self.min_cnt_input.value or 2000)
-        self.service.max_counts_limit = int(self.max_cnt_input.value or 15000)
+        logger.warning(f"[USER_ACTION] Operator clicked START continuous survey. reset={self.max_cnt_input.value} cts")
+        self.service.max_counts_limit = int(self.max_cnt_input.value or self.service.DEFAULT_MAX_COUNTS_LIMIT)
         self.service.start_continuous_survey()
 
     def trigger_stop(self):
