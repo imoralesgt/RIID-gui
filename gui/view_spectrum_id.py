@@ -43,7 +43,7 @@ class SpectrumPlotContainer:
         with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2'):
             with ui.column().classes('rounded-lg border bg-white p-2 gap-1').style('width: 65%; border-color: #E2E8F0;'):
                 with ui.row().classes('w-full justify-between items-center px-1 flex-wrap'):
-                    ui.label('Live Spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                    self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
                     with ui.row().classes('items-center gap-3'):
                         # Issue #39: lets the operator choose between the two
                         # RadiaCode-style visualization templates - overlaid
@@ -166,16 +166,19 @@ class SpectrumPlotContainer:
         """Colors the active visualization-mode button to match its own
         trace's color (blue for overlay, orange for subtracted - see
         BRAND_COLORS['subtracted_trace']), and the inactive one as a plain
-        outline, so the selector visually previews what's about to be shown."""
+        outline, so the selector visually previews what's about to be shown.
+        Also updates the card's own title to reflect the active mode."""
         active_style = "color: #FFFFFF !important; font-weight: bold; border: none;"
         inactive_style = "background-color: #FFFFFF !important; color: #4B5563 !important; border: 1px solid #D1D5DB !important; font-weight: normal;"
         
         if self.viz_mode == 'overlay':
             self.viz_mode_btn_overlay.style(f"background-color: {BRAND_COLORS['primary']} !important; {active_style}")
             self.viz_mode_btn_subtracted.style(inactive_style)
+            self.spectrum_card_title.set_text('Live spectrum')
         else:
             self.viz_mode_btn_overlay.style(inactive_style)
             self.viz_mode_btn_subtracted.style(f"background-color: {BRAND_COLORS['subtracted_trace']} !important; {active_style}")
+            self.spectrum_card_title.set_text('Live spectrum (background subtracted)')
 
     def trigger_log_scale_change(self, e):
         """Issue #39: relocated here from the Survey Control Console sidebar,
@@ -819,7 +822,7 @@ class ControlPanelSidebar:
             with ui.row().classes('w-full gap-2 no-wrap pt-1'):
                 self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
                 self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
-                self.clear_btn = ui.button('CLEAR', icon='delete_sweep', on_click=self.trigger_clear)
+                self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
                 self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
 
             # Issue #41: bundles the last spectrum shown here with the current
@@ -927,7 +930,7 @@ class ControlPanelSidebar:
         self.service.stop_execution()
 
     def trigger_clear(self):
-        logger.warning("[USER_ACTION] Operator clicked CLEAR button - wiping accumulated survey spectrum (background preserved).")
+        logger.warning("[USER_ACTION] Operator clicked RESTART button - wiping accumulated survey spectrum (background preserved).")
         self.service.clear_survey_data()
 
     def trigger_download_riid(self):

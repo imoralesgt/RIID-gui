@@ -1,10 +1,30 @@
 from nicegui import app, ui
+import os
 from config import BRAND_COLORS, logger
 from riid_service import RIIDCoreService
 from view_spectrum_id import SpectrumPlotContainer, ControlPanelSidebar
 from view_recording import SpectrumRecordingPanel
 from view_download import SpectraDownloadPanel
 from view_calibration import HardwareCalibrationPanel
+
+# Explicitly serves just this one file at a known URL, rather than relying on
+# ui.image()'s implicit "pass it a local path and hope it gets auto-served"
+# behavior - which is exactly the kind of path-resolution quirk that made the
+# favicon setting silently fail until the leading "./" was dropped. Mounting
+# a single named file (not the whole directory via add_static_files) also
+# avoids exposing the rest of this directory - source code, config, data -
+# over an unauthenticated static route.
+#
+# Absolute path, anchored to this file's own location (not the ambient
+# current working directory the app happens to be launched from) - removes
+# any remaining path-resolution ambiguity. Logged loudly if missing, so a
+# wrong path fails obviously instead of silently rendering nothing.
+_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'iaea_logo.png')
+if os.path.isfile(_LOGO_PATH):
+    app.add_static_file(local_file=_LOGO_PATH, url_path='/iaea_logo.png')
+    logger.info(f"[BOOT] Logo file found and mounted at /iaea_logo.png -> {_LOGO_PATH}")
+else:
+    logger.error(f"[BOOT] Logo file NOT FOUND at expected path: {_LOGO_PATH} - the header logo will not display.")
 
 # Name of the ML model used for RIID. Available options in folder `ml_models/`
 ML_MODEL_NAME = 'cnn_multilabel'
@@ -67,7 +87,9 @@ class RIIDSpectroscopyApp:
                 
                 # Application Header Layout Block
                 with ui.row().classes('w-full justify-between items-center px-2 py-1 border-b').style("border-color: #D1D5DB;"):
-                    ui.markdown(f"### **IAEA** RIID Laboratory Spectroscopy Station").classes('text-base font-bold text-slate-800 m-0 p-0')
+                    with ui.row().classes('items-center gap-2'):
+                        ui.html('<img src="/iaea_logo.png" style="height: 60px; width: auto; display: block;" alt="IAEA logo" />')
+                        ui.markdown("# RIID and spectroscopy station").classes('text-base font-bold text-slate-800 m-0 p-0')
                     self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold px-3 py-1 rounded bg-white shadow-sm border text-blue-700 border-blue-200')
 
                 # Global Interlock Connectivity Banner View Card
@@ -163,4 +185,4 @@ def index():
     RIIDSpectroscopyApp()
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title="RIID Gamma Spectroscopy Station", port=8080)
+    ui.run(title="RIID Gamma Spectroscopy Station", port=8080, favicon=_LOGO_PATH)
