@@ -130,24 +130,24 @@
     "Detector serial number": "S1AB2064",
     "Analyzer name": "NSIL-DPP4SiPM-SYS07"
   },
-  "210328BE4379B": {
-    "SYS-ID": "SYS09",
+  "210328BE3DC2B": {
+    "SYS-ID": "SYS08",
     "tau_d": 1.21e-06,
     "tau_r": 2.06e-07,
     "shaper_s_tau_pk": 2.5e-06,
     "shaper_s_tau_pk_top": 1e-06,
-    "vga_gain_coarse": 4.93,
-    "blr_s_threshold_gain": 4.25,
+    "vga_gain_coarse": 7.0,
+    "blr_s_threshold_gain": 3.0,
     "smoothing_factor": 2,
     "invert_pulse": false,
-    "calib_a0": -6.41172,
-    "calib_a1": 0.98725,
-    "calib_a2": 3.622e-05,
+    "calib_a0": -7.28023,
+    "calib_a1": 0.99487,
+    "calib_a2": 2.635e-05,
     "Detector type": "NaI(Tl)",
     "Detector geometry": "Cylindrical",
-    "Detector size": "5.1 cm width and height x 7.6 cm thick",
+    "Detector size": "4.0 cm width and height x 6.0 cm thick",
     "Detector type number": "38B38/SIP-E3-X2",
-    "Detector serial number": "S2AC2204",
+    "Detector serial number": "S1AB3937",
     "Analyzer name": "NSIL-DPP4SiPM"
   }
 }
