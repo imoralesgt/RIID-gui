@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from nicegui import ui
 from state_engine import SpectrumAcquisitionSystem
-from config import BRAND_COLORS, logger
+from config import BRAND_COLORS, get_rgba_fill, logger
 
 class SpectrumRecordingPanel:
     # Fixed on purpose: kept constant across data updates so Plotly preserves the
@@ -32,6 +32,10 @@ class SpectrumRecordingPanel:
         # refreshes (rather than torn down and recreated) so the browser-side plot
         # instance - and the user's zoom/pan state - persists.
         self._plot_widget = None
+        # Issue #77: independent of the RIID tab's own log-scale preference -
+        # a separate control for a separate plot. Disabled by default per the
+        # issue's explicit requirement.
+        self.use_log_scale = False
         self.render_layout()
 
     def render_layout(self):
@@ -117,6 +121,19 @@ class SpectrumRecordingPanel:
                 ui.label('Batch Recording Output & Controls').classes('text-xs font-bold uppercase tracking-wider text-zinc-700')
                 self.record_plot_container = ui.column().classes('w-full items-center justify-center rounded-lg border p-1 bg-white')
                 
+                # Issue #77: log-scale toggle (independent of the RIID tab's own),
+                # plus real-time count-rate/total-counts stats that reset with
+                # every new run (batch_elapsed_seconds and batch_spectrum are
+                # already reset by the hardware sequence at the start of each
+                # run - see RIIDCoreService._batch_recording_sequence 
+                with ui.row().classes('w-full items-center justify-between mt-1'):
+                    self.batch_log_scale_checkbox = ui.checkbox(
+                        'Log-scale', value=self.use_log_scale, on_change=self.trigger_batch_log_scale_change
+                    ).classes('text-xs text-zinc-600 font-medium')
+                    with ui.row().classes('items-center gap-3'):
+                        self.batch_cps_label = ui.label('Rate: -- cps').classes('text-xs font-mono text-zinc-600')
+                        self.batch_total_label = ui.label('Total: -- counts').classes('text-xs font-mono text-zinc-600')
+                
                 with ui.row().classes('w-full gap-2 items-center justify-between mt-1 pt-1 border-t'):
                     self.time_input = ui.number('Live-Time (s)', value=self.service.batch_target_time, format='%d').props('dense outlined').classes('w-24 text-xs')
                     self.runs_input = ui.number('Recordings (Runs)', value=self.service.batch_total_runs, format='%d').props('dense outlined min=1').classes('w-28 text-xs')
@@ -145,6 +162,12 @@ class SpectrumRecordingPanel:
         logger.warning("[USER_ACTION] Operator requested STOP multi-run batch recording.")
         self.service.stop_execution()
 
+    def trigger_batch_log_scale_change(self, e):
+        logger.info(f"[USER_ACTION] Operator modified batch plot scaling preference -> use_log_scale={e.value}")
+        self.use_log_scale = e.value
+        self._last_batch_render_signature = None  # force an immediate redraw
+        self.refresh_recording_canvas(self.service.batch_spectrum)
+
     def sync_ui_state(self):
         """Pulls ongoing multi-run telemetry fields from server memory instantly upon page visibility re-attachment."""
         is_batch = self.service.state == 'BATCH_RECORDING'
@@ -171,6 +194,19 @@ class SpectrumRecordingPanel:
         spectrum = self.service.batch_spectrum
         render_signature = (len(spectrum) if spectrum else 0, sum(spectrum) if spectrum else 0)
         
+        # Cheap text updates - always run these regardless of whether the heavy
+        # plot redraw below gets skipped, so the rate stays live even on a tick
+        # where the spectrum content happens not to have changed.
+        if spectrum:
+            total_counts = sum(spectrum)
+            elapsed_s = float(self.service.batch_elapsed_seconds or 0)
+            cps = float(total_counts / elapsed_s) if elapsed_s > 0 else 0.0
+            self.batch_cps_label.set_text(f"Rate: {cps:.2f} cps")
+            self.batch_total_label.set_text(f"Total: {total_counts} counts")
+        else:
+            self.batch_cps_label.set_text("Rate: -- cps")
+            self.batch_total_label.set_text("Total: -- counts")
+        
         # While no batch run is active, only redraw the canvas if the spectrum
         # actually differs from what's already shown - otherwise this rebuilds an
         # identical Plotly figure every second, causing a visible "blink".
@@ -196,11 +232,26 @@ class SpectrumRecordingPanel:
         a2 = float(prof.get('calib_a2', 0.0))
         energy_axis = [a0 + (a1 * ch) + (a2 * (ch ** 2)) for ch in range(num_channels)]
         
+        # Issue #77: log-scale values are floored at 1 for display only (never
+        # the underlying data) - log(0) is undefined, and without this, zero-
+        # count channels crush into a visually broken sliver below the axis's
+        # own floor, same issue already fixed on the RIID tab's spectrum plot.
+        display_y = [v if v >= 1 else 1 for v in spectrum_data] if self.use_log_scale else spectrum_data
+        
+        trace = {'x': energy_axis, 'y': display_y, 'type': 'scatter', 'mode': 'lines', 'line': {'color': BRAND_COLORS['primary'], 'width': 1.2}}
+        if not self.use_log_scale:
+            # Shading is deliberately omitted in log mode (issue #77's explicit
+            # requirement) - filling to y=0 on a log axis is misleading, since
+            # the visual "zero" floor is actually the flooring clip above, not
+            # a true zero.
+            trace['fill'] = 'tozeroy'
+            trace['fillcolor'] = get_rgba_fill('primary')
+        
         fig = {
-            'data': [{'x': energy_axis, 'y': spectrum_data, 'type': 'scatter', 'mode': 'lines', 'line': {'color': BRAND_COLORS['primary'], 'width': 1.2}}],
+            'data': [trace],
             'layout': {
                 'xaxis': {'title': 'Energy (keV)', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6', 'autorange': True},
-                'yaxis': {'title': 'Counts', 'type': 'log', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6'},
+                'yaxis': {'title': 'Counts', 'type': 'log' if self.use_log_scale else 'linear', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6'},
                 'margin': {'l': 40, 'r': 15, 't': 10, 'b': 30}, 'plot_bgcolor': '#FFFFFF', 'paper_bgcolor': '#FFFFFF', 'showlegend': False,
                 'uirevision': self.PLOT_UIREVISION,
             }
