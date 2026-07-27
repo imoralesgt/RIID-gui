@@ -109,6 +109,11 @@ class RIIDCoreService:
         # returned a plain status string instead (e.g. "not enough counts").
         self.ml_model_name = ml_model_name
         self.last_ml_result = None
+        # Tracks the isotope set from the last logged ML detection (as a
+        # frozenset of names, or None) - lets _execute_ml_pipeline() log only
+        # when the result actually CHANGES, instead of re-logging an identical
+        # line every ~1s poll tick during a long survey.
+        self._last_logged_detection = None
         
         # Issue #34: rolling window of (elapsed_seconds, instantaneous_cps, source)
         # samples for the count-rate-over-time plot - distinct from the
@@ -655,6 +660,25 @@ class RIIDCoreService:
         if isinstance(result, dict):
             self.last_ml_result = result
             detected = {k: v for k, v in result.items() if v > self.ml_inference.CLASSIFICATION_THRESHOLD}
+            
+            # Log the actual identification result/event - the GUI already
+            # displays this, but nothing was previously recording it in the
+            # log for an audit trail. Only fires when the detected set
+            # actually changes (a new isotope appears, the set changes, or it
+            # clears back to nothing), not every ~1s poll tick, which would
+            # otherwise spam an identical line throughout a long survey.
+            current_detection_key = frozenset(detected.keys())
+            if current_detection_key != self._last_logged_detection:
+                if detected:
+                    summary = ", ".join(f"{name} ({conf * 100:.1f}%)" for name, conf in detected.items())
+                    logger.warning(f"[ML_DETECTION] Isotope(s) identified: {summary}")
+                elif self._last_logged_detection:
+                    # Only log the "cleared" transition if a detection had
+                    # previously been logged - avoids a spurious "nothing
+                    # detected" line the very first time inference runs.
+                    logger.warning("[ML_DETECTION] No isotope currently exceeds the detection threshold (previous detection cleared).")
+                self._last_logged_detection = current_detection_key
+            
             if detected:
                 return " + ".join(detected.keys())
             return "No isotope exceeded the detection threshold"
@@ -1468,6 +1492,7 @@ class RIIDCoreService:
             return
         
         logger.warning("[SERVICE] Operator pressed CLEAR button. Wiping accumulated survey spectrum (background spectrum preserved).")
+        self._last_logged_detection = None
         
         if self.state == 'ACQUIRING_SURVEY':
             # Let the active acquisition loop perform the actual hardware-level clear
