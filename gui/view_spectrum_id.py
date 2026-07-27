@@ -773,7 +773,7 @@ class ControlPanelSidebar:
                 # has been removed entirely - inference is now always attempted,
                 # relying on MlInference's own internal not-enough-counts check.
                 initial_threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
-                self.threshold_label = ui.label(f"Detection Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-700')
+                self.threshold_label = ui.label(f"Confidence Threshold ({initial_threshold * 100:.1f}%)").classes('text-xs text-zinc-700')
                 self.threshold_slider = ui.slider(
                     min=0.50, max=0.999, step=0.001, value=initial_threshold,
                     on_change=self.trigger_threshold_change
@@ -786,7 +786,7 @@ class ControlPanelSidebar:
                 # pipeline attempts classification at all rather than
                 # returning "not enough counts".
                 initial_min_counts = self.service.ml_inference.get_min_counts()
-                self.min_counts_label = ui.label(f"Min. Counts to Trigger ML ({initial_min_counts} cts)").classes('text-xs text-zinc-700')
+                self.min_counts_label = ui.label(f"ML pipeline single-channel trigger ({initial_min_counts} counts)").classes('text-xs text-zinc-700')
                 self.min_counts_slider = ui.slider(
                     min=1, max=200, step=1, value=initial_min_counts,
                     on_change=self.trigger_min_counts_change
