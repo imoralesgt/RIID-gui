@@ -125,7 +125,8 @@ class SpectrumRecordingPanel:
                 # plus real-time count-rate/total-counts stats that reset with
                 # every new run (batch_elapsed_seconds and batch_spectrum are
                 # already reset by the hardware sequence at the start of each
-                # run - see RIIDCoreService._batch_recording_sequence 
+                # run - see RIIDCoreService._batch_recording_sequence - so no
+                # backend changes were needed to get that reset behavior).
                 with ui.row().classes('w-full items-center justify-between mt-1'):
                     self.batch_log_scale_checkbox = ui.checkbox(
                         'Log-scale', value=self.use_log_scale, on_change=self.trigger_batch_log_scale_change
@@ -216,6 +217,32 @@ class SpectrumRecordingPanel:
         
         self.refresh_recording_canvas(spectrum)
 
+    def _batch_y_axis_layout(self) -> dict:
+        """Issue #79: matches the RIID tab's spectrum plot axis styling exactly
+        (same title/tick font sizes, same log-mode decade-tick formatting),
+        rather than the batch plot's own smaller, differently-configured axes."""
+        if self.use_log_scale:
+            return {
+                'title': {'text': 'Counts', 'font': {'size': 13}},
+                'automargin': True,
+                'type': 'log',
+                'tickfont': {'size': 11},
+                'gridcolor': '#F3F4F6',
+                'autorange': True,
+                'range': [0, None],
+                'dtick': 1,
+                'tickformat': '.0f'
+            }
+        else:
+            return {
+                'title': {'text': 'Counts', 'font': {'size': 13}},
+                'automargin': True,
+                'type': 'linear',
+                'tickfont': {'size': 11},
+                'gridcolor': '#F3F4F6',
+                'autorange': True
+            }
+
     def refresh_recording_canvas(self, spectrum_data: list):
         if not spectrum_data:
             self.record_plot_container.clear()
@@ -250,8 +277,8 @@ class SpectrumRecordingPanel:
         fig = {
             'data': [trace],
             'layout': {
-                'xaxis': {'title': 'Energy (keV)', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6', 'autorange': True},
-                'yaxis': {'title': 'Counts', 'type': 'log' if self.use_log_scale else 'linear', 'tickfont': {'size': 8}, 'gridcolor': '#F3F4F6'},
+                'xaxis': {'title': {'text': 'Energy (keV)', 'font': {'size': 13}}, 'automargin': True, 'tickfont': {'size': 11}, 'gridcolor': '#F3F4F6', 'autorange': True},
+                'yaxis': self._batch_y_axis_layout(),
                 'margin': {'l': 40, 'r': 15, 't': 10, 'b': 30}, 'plot_bgcolor': '#FFFFFF', 'paper_bgcolor': '#FFFFFF', 'showlegend': False,
                 'uirevision': self.PLOT_UIREVISION,
             }
