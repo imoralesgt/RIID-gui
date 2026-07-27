@@ -1479,6 +1479,25 @@ class RIIDCoreService:
         
         if self._main_loop_task: self._main_loop_task.cancel()
 
+    @property
+    def is_spectrum_id_active(self) -> bool:
+        """True while a Spectrum ID tab activity is in progress - either an
+        active survey or a background recording (background recording is
+        triggered from, and only meaningful within, the Spectrum ID tab's own
+        sidebar). Used to disable the Spectrum Recording and Hardware &
+        Calibration tabs while true, preventing the operator from launching a
+        conflicting batch run or changing DAQ/calibration settings mid-survey
+        (either of which could crash the hardware or corrupt the current
+        measurement)."""
+        return self.state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+
+    @property
+    def is_batch_recording_active(self) -> bool:
+        """True while a Spectrum Recording (batch) run is in progress. Used to
+        disable the Spectrum ID and Hardware & Calibration tabs while true,
+        for the same hardware-safety reasons as is_spectrum_id_active above."""
+        return self.state == 'BATCH_RECORDING'
+
     def clear_survey_data(self):
         """Explicitly wipes the accumulated survey spectrum trace (and its associated
         timers/state) on operator demand. This is the ONLY path that resets the live

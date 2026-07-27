@@ -123,8 +123,18 @@ class RIIDSpectroscopyApp:
                         self.tab_download = ui.tab('Spectra Download', icon='download').classes('text-xs font-bold py-2')
                         self.tab_hardware = ui.tab('Hardware & Calibration', icon='tune').classes('text-xs font-bold py-2')
 
+                # Picks the initial active tab from the backend's CURRENT state,
+                # rather than always defaulting to Spectrum ID - otherwise a
+                # browser reload while a batch recording is already running
+                # would land the operator on a tab that's about to be disabled
+                # (Spectrum ID), rather than the one actually in progress.
+                if backend_service.is_batch_recording_active:
+                    initial_tab = self.tab_recording
+                else:
+                    initial_tab = self.tab_id
+                
                 # Dynamic Content Panel Frames Container
-                with ui.tab_panels(self.main_tabs, value=self.tab_id).classes('w-full bg-transparent p-0 flex-1'):
+                with ui.tab_panels(self.main_tabs, value=initial_tab).classes('w-full bg-transparent p-0 flex-1') as self.tab_panels:
                     with ui.tab_panel(self.tab_id).classes('p-0 m-0 bg-transparent'):
                         with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
                             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 72%; border-color: #E2E8F0;'):
@@ -164,6 +174,44 @@ class RIIDSpectroscopyApp:
         if self.current_applied_sys_id != current_sys_id:
             logger.warning(f"[UI_SYNC] Dynamic profile shift detected in title string context ({self.current_applied_sys_id} -> {current_sys_id}). Re-writing window title...")
             self.update_browser_tab_title()
+
+        # Disables the tabs unrelated to whichever session (if any) is
+        # currently in progress, to prevent the operator from launching a
+        # conflicting run or changing DAQ/calibration settings mid-measurement
+        # - either of which could crash the hardware or corrupt the current
+        # data. Runs every tick, so this applies both reactively (if a session
+        # starts while the operator is on an unrelated tab) and correctly
+        # right after a browser reload/reconnect, when a session might already
+        # be running in the backend before this client's first tick even
+        # fires. If the operator is currently viewing a tab that just became
+        # disabled, they're redirected back to whichever tab the active
+        # session actually belongs to, rather than being left stranded on
+        # (or able to keep interacting with) a now-disabled panel.
+        spectrum_id_active = backend_service.is_spectrum_id_active
+        batch_active = backend_service.is_batch_recording_active
+        
+        if spectrum_id_active:
+            self.tab_recording.disable()
+        else:
+            self.tab_recording.enable()
+        
+        if spectrum_id_active or batch_active:
+            self.tab_hardware.disable()
+        else:
+            self.tab_hardware.enable()
+        
+        if batch_active:
+            self.tab_id.disable()
+        else:
+            self.tab_id.enable()
+        
+        current_tab = self.tab_panels.value
+        if spectrum_id_active and current_tab in (self.tab_recording, self.tab_hardware):
+            logger.warning("[UI_SYNC] Redirected away from a tab disabled by an active Spectrum ID session.")
+            self.tab_panels.value = self.tab_id
+        elif batch_active and current_tab in (self.tab_id, self.tab_hardware):
+            logger.warning("[UI_SYNC] Redirected away from a tab disabled by an active batch recording session.")
+            self.tab_panels.value = self.tab_recording
 
         # Robust direct object validation pattern bypasses container iteration completely
         if self.calibration_panel is not None:
