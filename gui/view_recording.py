@@ -142,9 +142,9 @@ class SpectrumRecordingPanel:
                     
                     with ui.row().classes('gap-1'):
                         self.start_btn = ui.button('Start', icon='play_arrow', on_click=self.trigger_batch_start)
-                        self.start_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('text-xs')
+                        self.start_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('text-xs')
                         self.stop_btn = ui.button('Stop', icon='stop', on_click=self.trigger_batch_stop)
-                        self.stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('text-xs')
+                        self.stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('text-xs')
 
                 self.progress_bar = ui.linear_progress(value=0.0, show_value=False).classes('w-full h-1.5 mt-1 rounded').props('color=primary')
                 self.status_label = ui.label('Status: Ready').classes('text-xs font-mono text-zinc-500 q-my-none')
