@@ -34,8 +34,8 @@ class RIIDCoreService:
     # parsing code, instead of each place re-typing its own copy of the same
     # number (which had already drifted out of sync in a couple of spots).
     DEFAULT_MAX_COUNTS_LIMIT = 15000
-    DEFAULT_BG_TARGET_TIME_S = 30
-    DEFAULT_BATCH_TARGET_TIME_S = 30
+    DEFAULT_BG_TARGET_TIME_S = 300
+    DEFAULT_BATCH_TARGET_TIME_S = 300
     DEFAULT_BATCH_TOTAL_RUNS = 1
     DEFAULT_BATCH_PREFIX = "spectrum_run"
     # Minimum single-channel count (after background subtraction) required
