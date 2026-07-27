@@ -205,6 +205,30 @@ class SpectrumPlotContainer:
         else:
             self.model_select.disable()
         
+        # The subtracted-mode button is only meaningful when there's an actual
+        # live survey trace to subtract from - exactly the same condition
+        # _append_subtracted_trace itself checks before drawing anything.
+        # Disabled during BG_RECORDING (only the background is being captured)
+        # and during plain idle with no survey ever run/stopped (only the
+        # background is being shown in that case too). Checked here, early,
+        # so it's never skipped by the render-signature cache below.
+        show_frozen_survey_early = getattr(self.service, 'survey_stopped_with_data', False)
+        subtracted_mode_available = current_state == 'ACQUIRING_SURVEY' or show_frozen_survey_early
+        if subtracted_mode_available:
+            self.viz_mode_btn_subtracted.enable()
+        else:
+            self.viz_mode_btn_subtracted.disable()
+            # Don't leave the operator stranded on a mode that would now show
+            # a blank plot - fall back to the always-available overlay mode.
+            # Mutates state directly rather than calling trigger_viz_mode_change()
+            # (which would itself call update_ui_elements() again, re-entrantly,
+            # since we're already inside that same method call) - the rest of
+            # this call picks up the updated viz_mode naturally further down.
+            if self.viz_mode == 'subtracted':
+                self.viz_mode = 'overlay'
+                self._update_viz_mode_buttons()
+                self._last_render_signature = None
+        
         is_actively_recording = current_state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
         
         # Cheap fingerprint of everything that could visually change the plot. While
@@ -788,9 +812,9 @@ class ControlPanelSidebar:
                 
                 with ui.row().classes('w-full gap-2 no-wrap pt-1') as self.live_survey_controls_row:
                     self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
-                    self.play_stop_btn.style("background-color: #10B981; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
+                    self.play_stop_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
                     self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
-                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
+                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
 
                 # Issue #41: bundles the last spectrum shown here with the current
                 # background into a downloadable .zip (both in .json and .spe).
@@ -815,7 +839,7 @@ class ControlPanelSidebar:
                     self.bg_progress_bar.set_visibility(False)
 
                     self.bg_btn = ui.button('RECORD BACKGROUND SPECTRUM', icon='security', on_click=self.trigger_bg)
-                    self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
+                    self.bg_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full py-2 text-xs shadow-md')
 
                     ui.separator().classes('bg-gray-200')
 
@@ -827,7 +851,7 @@ class ControlPanelSidebar:
                             self.bg_file_select = ui.select(options=[], label='Load Pre-Recorded Background').props('dense outlined').classes('flex-1 text-xs')
                             ui.button(icon='refresh', on_click=self.refresh_bg_file_list).props('dense flat round').classes('text-zinc-600')
                         self.load_bg_btn = ui.button('LOAD SELECTED BACKGROUND', icon='folder_open', on_click=self.trigger_load_bg)
-                        self.load_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
+                        self.load_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; border: 1px solid #4A5568; color: #FFFFFF !important;").props('dense').classes('w-full py-1.5 text-xs')
                     self.refresh_bg_file_list()
 
                     ui.separator().classes('bg-gray-200')
@@ -839,7 +863,7 @@ class ControlPanelSidebar:
                     # which background would be saved.
                     self._build_save_bg_modal()
                     self.save_bg_btn = ui.button('Store Background Spectrum', icon='save', on_click=self.open_save_bg_dialog)
-                    self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']}; border: 1px solid #4A5568; color: #FFFFFF;").props('dense').classes('w-full py-1.5 text-xs')
+                    self.save_bg_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; border: 1px solid #4A5568; color: #FFFFFF !important;").props('dense').classes('w-full py-1.5 text-xs')
 
             # ============ SYSTEM CONSOLE (collapsible, closed by default) ============
             # Raw status readout - moved to the bottom and collapsed by default,
@@ -1067,11 +1091,11 @@ class ControlPanelSidebar:
         if is_idle:
             self.play_stop_btn.set_text('START')
             self.play_stop_btn.props('icon=play_arrow')
-            self.play_stop_btn.style("background-color: #10B981; font-weight: bold;")
+            self.play_stop_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;")
         else:
             self.play_stop_btn.set_text('STOP')
             self.play_stop_btn.props('icon=stop')
-            self.play_stop_btn.style("background-color: #EF4444; font-weight: bold;")
+            self.play_stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']} !important; color: #FFFFFF !important; font-weight: bold;")
 
         self.play_stop_btn.set_visibility((is_idle and hw_ok and has_bg) or not is_idle)
 
