@@ -792,7 +792,24 @@ class ControlPanelSidebar:
                     on_change=self.trigger_min_counts_change
                 ).props('color=primary').classes('w-full')
                 
-                self.max_cnt_input = ui.number('Hysteresis Cycle Reset (cts)', value=self.service.max_counts_limit, format='%d').classes('w-full text-xs').props('dense outlined')
+                # Issue #38: peak-single-channel-based hysteresis auto-reset,
+                # enabled by default. The threshold is computed automatically
+                # each tick from the peak channel's own rate (see
+                # RIIDCoreService._compute_dynamic_hysteresis_threshold) - a
+                # read-only display while enabled. Unchecking reveals a manual
+                # numeric input instead, letting the operator set a fixed
+                # peak-single-channel-count threshold directly.
+                self.auto_hysteresis_checkbox = ui.checkbox(
+                    'Auto-reset hysteresis (peak-channel based)', value=self.service.auto_hysteresis_enabled,
+                    on_change=self.trigger_auto_hysteresis_toggle
+                ).classes('text-xs text-zinc-700 font-medium')
+                self.max_cnt_label = ui.label(f"Hysteresis reset (auto): {self.service.max_counts_limit:,} cts").classes('text-xs text-zinc-700')
+                self.max_cnt_input = ui.number(
+                    'Hysteresis Reset (peak-channel cts)', value=self.service.max_counts_limit, format='%d',
+                    on_change=self.trigger_manual_hysteresis_change
+                ).classes('w-full text-xs').props('dense outlined')
+                self.max_cnt_label.set_visibility(self.service.auto_hysteresis_enabled)
+                self.max_cnt_input.set_visibility(not self.service.auto_hysteresis_enabled)
 
             # ============ LIVE SURVEY (primary workflow) ============
             # Directly below ML Pipeline Settings now that the diagnostic
@@ -884,7 +901,7 @@ class ControlPanelSidebar:
         idle-only, since adjusting sensitivity on the fly during an active
         survey is a reasonable, useful thing to do."""
         new_threshold = float(e.value)
-        self.threshold_label.set_text(f"Detection Threshold ({new_threshold * 100:.1f}%)")
+        self.threshold_label.set_text(f"Confidence Threshold ({new_threshold * 100:.1f}%)")
         self.service.set_ml_classification_threshold(new_threshold)
 
     def trigger_min_counts_change(self, e):
@@ -892,8 +909,26 @@ class ControlPanelSidebar:
         attempt classification, live as the slider moves - same not-gated-to-
         idle reasoning as the threshold slider above."""
         new_min_counts = int(e.value)
-        self.min_counts_label.set_text(f"Min. Counts to Trigger ML ({new_min_counts} cts)")
+        self.min_counts_label.set_text(f"ML pipeline single-channel trigger ({new_min_counts} counts)")
         self.service.set_ml_min_counts(new_min_counts)
+
+    def trigger_auto_hysteresis_toggle(self, e):
+        """Issue #38: switches between the automatic (default) and manual
+        hysteresis-reset modes, swapping which control is visible."""
+        enabled = bool(e.value)
+        self.service.set_auto_hysteresis_enabled(enabled)
+        self.max_cnt_label.set_visibility(enabled)
+        self.max_cnt_input.set_visibility(not enabled)
+        if not enabled:
+            # Seed the manual input with the last auto-computed value, rather
+            # than whatever stale number happened to be in the field before -
+            # a reasonable starting point for the operator to adjust from.
+            self.max_cnt_input.set_value(self.service.max_counts_limit)
+
+    def trigger_manual_hysteresis_change(self, e):
+        """Issue #38: sets the operator's manual peak-single-channel-count
+        threshold - only takes effect while auto-reset is disabled."""
+        self.service.set_manual_hysteresis_threshold(int(e.value or self.service.DEFAULT_MAX_COUNTS_LIMIT))
 
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
@@ -968,8 +1003,7 @@ class ControlPanelSidebar:
             self.trigger_stop()
 
     def trigger_start(self):
-        logger.warning(f"[USER_ACTION] Operator clicked START continuous survey. reset={self.max_cnt_input.value} cts")
-        self.service.max_counts_limit = int(self.max_cnt_input.value or self.service.DEFAULT_MAX_COUNTS_LIMIT)
+        logger.warning("[USER_ACTION] Operator clicked START continuous survey.")
         self.service.start_continuous_survey()
 
     def trigger_stop(self):
@@ -996,6 +1030,16 @@ class ControlPanelSidebar:
         is_survey_running = self.service.state == 'ACQUIRING_SURVEY'
         hw_ok = self.service.is_hardware_available
         has_bg = len(self.service.background_spectrum) > 0
+
+        # Issue #38: reflects the backend's current dynamically-computed
+        # hysteresis threshold - only actually changes while a survey is
+        # running (that's the only time _compute_dynamic_hysteresis_threshold
+        # gets called), but kept live-updating here regardless so it never
+        # shows a stale value from a previous session. Only updates the label
+        # (auto mode's read-only display) - the manual input, when visible,
+        # holds the operator's own value and isn't touched here.
+        if self.service.auto_hysteresis_enabled:
+            self.max_cnt_label.set_text(f"Hysteresis reset (auto): {self.service.max_counts_limit:,} cts")
 
         # Calculate exact Counts Per Second (CPS) metrics based directly on MCA hardware live-time
         if is_survey_running and self.service.live_spectrum:
