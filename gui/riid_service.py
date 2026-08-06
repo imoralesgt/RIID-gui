@@ -43,7 +43,7 @@ class RIIDCoreService:
     # before MlInference.inference_pipeline() attempts classification at all -
     # was hardcoded separately at both construction sites (__init__ and
     # set_ml_model), now a single source of truth referenced by both.
-    DEFAULT_ML_MIN_COUNTS = 20
+    DEFAULT_ML_MIN_COUNTS = 10
 
     # Issue #38 (updated): dynamic hysteresis (auto-reset) model, replacing
     # the old static total-count threshold. That static value caused two
@@ -69,23 +69,47 @@ class RIIDCoreService:
     # increasingly dominate it; a sliding window stays equally responsive to a
     # genuine rate change (e.g. a source being moved closer) no matter how
     # long the current cycle has been running.
-    HYSTERESIS_TARGET_TIME_S = 20.0
+    HYSTERESIS_TARGET_TIME_S = 25.0
     # Number of recent instantaneous peak-channel-rate samples (~1/s) averaged
     # for the sliding-window rate estimate.
     HYSTERESIS_WINDOW_SAMPLES = 5
-    # FLOOR = min_counts * this multiplier - deliberately ABOVE the ML
-    # pipeline's own min_counts, not equal to it. At exactly min_counts, a
-    # faint source would trigger a reset the instant the ML pipeline could
-    # just barely attempt a classification, leaving the operator almost no
-    # time to actually read the result before it's cleared. A small margin
-    # (~1.2x) keeps the buffer alive a bit past that
-    # point instead.
-    HYSTERESIS_FLOOR_MULTIPLIER = 1.2
+    # Used only as a fallback multiplier for the brief window before the
+    # first peak-channel-rate sample exists (see
+    # _compute_dynamic_hysteresis_threshold) - the main formula is additive
+    # (min_counts + rate*TARGET_TIME_S) and no longer needs a multiplicative
+    # floor at all, since that additive term alone already guarantees the
+    # threshold sits comfortably above min_counts once a real rate is known.
+    HYSTERESIS_FLOOR_MULTIPLIER = 1.6
     # A single channel reaching this is implausible even at very high total
     # count rates - a photopeak typically captures only a modest fraction of
     # total counts - so this is a generous safety cap, not something normal
     # operation should ever actually reach.
     HYSTERESIS_CEILING_COUNTS = 50_000
+    
+    # Adaptive ML trigger threshold (min_counts): the operator's configured
+    # value (ML_MIN_COUNTS_TARGET default, via the slider) works well for
+    # well-lit sources, but a faint source (e.g. ~25% above background) could
+    # take 2+ minutes to reach it at all, since MlInference won't attempt
+    # classification before then. Lowering min_counts globally would fix that
+    # but degrade statistics (and raise false-positive risk) for every
+    # source, including ones that don't need it.
+    #
+    # Model: effective_min_counts = clamp(ABSOLUTE_FLOOR, avg_peak_channel_rate
+    # * TIME_BUDGET_S, operator_target). A source fast enough to reach the
+    # operator's target within TIME_BUDGET_S uses the full target unchanged
+    # (preserving today's good statistics for active sources); a slower
+    # source gets a proportionally lower effective threshold instead, bounded
+    # below by ABSOLUTE_FLOOR so it never drops so low the result becomes
+    # statistically meaningless. Verified against the reported scenario: a
+    # source at ~25% above background goes from >120s to ~60s to first
+    # trigger a classification attempt; a source at typical high-activity
+    # rates is unaffected (its target is already reached well within budget).
+    ML_TRIGGER_ABSOLUTE_FLOOR = 5
+    ML_TRIGGER_TIME_BUDGET_S = 60.0
+    
+    # Rolling window size for cps_history (the count-rate-over-time plot's
+    # data) - ~4 minutes at the survey loop's 1s poll interval.
+    CPS_HISTORY_LEN = 240
 
     def __init__(self, ml_model_name : str):
         logger.info("[SERVICE_INIT] Initializing spectroscopy operations hub...")
@@ -172,8 +196,7 @@ class RIIDCoreService:
         # existing cumulative-average CPS shown in the spectrum plot's legend.
         # source is 'survey' or 'bg', so the plot can color each segment to
         # match the spectrum plot's own trace colors (blue/gray respectively).
-        # ~4 minutes at the survey loop's 1s poll interval.
-        self.cps_history = deque(maxlen=240)
+        self.cps_history = deque(maxlen=self.CPS_HISTORY_LEN)
         self._prev_survey_counts = 0
         self._prev_survey_elapsed_s = 0.0
         # Same delta-tracking, for background recording's own CPS samples.
@@ -200,6 +223,13 @@ class RIIDCoreService:
         self._peak_channel_rate_history = deque(maxlen=self.HYSTERESIS_WINDOW_SAMPLES)
         self._prev_peak_channel_value = 0.0
         self._prev_peak_channel_elapsed_s = 0.0
+        # Once the peak channel first reaches min_counts within a cycle (i.e.
+        # the ML pipeline is actually triggered for the first time since the
+        # last reset), min_counts stops being re-adapted for the rest of that
+        # cycle - see the poll loop and ML_TRIGGER_ABSOLUTE_FLOOR's docstring.
+        # Reset to False at the start of every fresh accumulation cycle
+        # (survey start, hysteresis auto-reset, and explicit CLEAR/RESTART).
+        self._ml_trigger_fired_this_cycle = False
         
         # Tracks whether the last survey was halted by the operator (STOP) while
         # holding valid spectrum data, so the plot can keep rendering it "frozen"
@@ -785,8 +815,35 @@ class RIIDCoreService:
                     self._prev_survey_elapsed_s = 0.0
                     self._prev_peak_channel_value = 0.0
                     self._prev_peak_channel_elapsed_s = 0.0
+                    self._ml_trigger_fired_this_cycle = False
                     self.current_isotope_id = "Buffer Reset. Re-accumulating..."
                     continue
+                
+                # Recomputed every tick from the current peak-channel rate and
+                # applied directly to MlInference, so the classification
+                # attempt right below always uses the current effective
+                # value - lower than DEFAULT_ML_MIN_COUNTS for a faint
+                # source, equal to it for anything reaching that comfortably
+                # within budget. Only while auto mode is on AND the pipeline
+                # hasn't yet been triggered this cycle - once the peak
+                # channel first reaches min_counts (the pipeline actually
+                # attempts a real classification instead of "not enough
+                # counts"), min_counts freezes at that value for the rest of
+                # this cycle. Without this, min_counts could keep drifting
+                # after the pipeline already started classifying - if it ever
+                # drifted back UP above the current peak, the pipeline would
+                # flip back to "not enough counts" mid-cycle even though the
+                # peak channel itself only ever increases within a cycle,
+                # which would be a confusing, unstable result to show. The
+                # hysteresis reset threshold above is unaffected by this and
+                # keeps adapting every tick regardless - it's explicitly
+                # meant to keep tracking the current count-rate trend even
+                # after min_counts has frozen.
+                if self.auto_hysteresis_enabled and not self._ml_trigger_fired_this_cycle:
+                    self.ml_inference.update_min_counts(self._compute_effective_ml_min_counts())
+                
+                if not self._ml_trigger_fired_this_cycle and peak_channel_value >= self.ml_inference.get_min_counts():
+                    self._ml_trigger_fired_this_cycle = True
                 
                 self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
                     
@@ -862,22 +919,27 @@ class RIIDCoreService:
         self.ml_inference.update_classification_threshold(new_threshold)
 
     def set_ml_min_counts(self, new_min_counts: int):
-        """Passthrough to MlInference.update_min_counts() - the entry point
-        the GUI's "Min. Counts to Trigger ML" slider calls, so the view layer
-        doesn't need to reach into self.ml_inference directly. This controls
-        MlInference's OWN internal gate (minimum single-channel count, after
-        background subtraction, before it attempts classification at all) -
-        distinct from the old min_counts_trigger, which was a separate,
-        higher-level, whole-spectrum-total gate in this class that decided
-        whether _execute_ml_pipeline() got called at all, and has since been
-        removed entirely (inference is now always attempted every tick)."""
+        """Directly sets MlInference's min_counts, called by the GUI's ML
+        trigger slider - only ever shown/usable in manual mode (see
+        auto_hysteresis_enabled), so this always applies immediately with no
+        adaptation. In auto mode, the poll loop recomputes and applies the
+        effective value itself every tick instead (see
+        _compute_effective_ml_min_counts), and this slider isn't shown at
+        all."""
         self.ml_inference.update_min_counts(int(new_min_counts))
 
     def set_auto_hysteresis_enabled(self, enabled: bool):
-        """Issue #38: toggles between the dynamic peak-channel-based auto-reset
-        (default) and a manually-set threshold, called by the GUI's auto-reset
-        checkbox."""
+        """Issue #38 (updated): toggles automatic mode for BOTH the hysteresis
+        reset threshold and the ML trigger threshold (min_counts) together -
+        called by the GUI's "Automatic hysteresis" checkbox."""
         self.auto_hysteresis_enabled = bool(enabled)
+        if enabled:
+            # Baseline immediately to the default rather than leaving
+            # whatever the manual slider last set - the poll loop only
+            # recomputes this during an active survey, so without this a
+            # switch to auto while idle would leave the "auto" display
+            # showing a stale manually-set value until the next survey starts.
+            self.ml_inference.update_min_counts(self.DEFAULT_ML_MIN_COUNTS)
         logger.warning(f"[USER_ACTION] Operator {'enabled' if enabled else 'disabled'} automatic hysteresis reset.")
 
     def set_manual_hysteresis_threshold(self, new_threshold: int):
@@ -994,35 +1056,96 @@ class RIIDCoreService:
         self._peak_channel_rate_history.clear()
         self._prev_peak_channel_value = 0.0
         self._prev_peak_channel_elapsed_s = 0.0
+        self._ml_trigger_fired_this_cycle = False
         logger.warning("[USER_ACTION] Operator cleared the count-rate plot history.")
 
     def _compute_dynamic_hysteresis_threshold(self) -> int:
-        """Issue #38 (updated): see the HYSTERESIS_* class constants above for
-        the full reasoning. Averages the sliding window of recent
-        instantaneous peak-channel-rate samples (self._peak_channel_rate_history,
-        populated once per poll tick in _continuous_survey_sequence) rather
-        than a cumulative average, so the estimate stays reactive to a
-        genuine rate change no matter how long the current cycle has run.
+        """Issue #38 (updated again): additive model, not a clamped
+        multiplicative floor. See the HYSTERESIS_* class constants above for
+        the sliding-window averaging. This method's own change is structural:
+        
+            threshold = DEFAULT_ML_MIN_COUNTS + avg_peak_channel_rate * TARGET_TIME_S
+        
+        instead of the previous clamp(min_counts * MULT, rate * TARGET_TIME_S
+        * MULT, ceiling). The clamped-floor version had a real flaw: in the
+        floor-limited regime (faint sources, where the proportional term
+        never exceeds the floor), the fraction of the cycle spent actually
+        SHOWING a result works out to exactly (MULT-1)/MULT - a constant
+        RATIO, regardless of how faint the source is. A faint source that
+        takes 2 minutes to reach min_counts got the same lousy ~33% show-
+        result window (at MULT=1.5) as one that takes 2 seconds - raising
+        MULT further would help, but it's still bounded by the SAME ratio
+        problem, whether the min_counts->floor relationship is linear or a
+        non-linear function of min_counts (e.g. a power law) - the ratio is
+        determined by the floor-to-min_counts relationship itself, not by
+        whether that relationship happens to be linear.
+        
+        The additive form sidesteps this: since rate cancels out algebraically
+        in (threshold - BASE) / rate = TARGET_TIME_S, EVERY source gets an
+        observation window of exactly TARGET_TIME_S seconds after crossing
+        BASE, regardless of activity - not a fixed fraction of a rate-
+        dependent wait, but a fixed duration, full stop.
+        
+        BASE is DEFAULT_ML_MIN_COUNTS specifically, NOT
+        self.ml_inference.get_min_counts() - a later change made that value
+        itself dynamically adapt down for a faint source (see
+        _compute_effective_ml_min_counts), which would otherwise couple two
+        independently-noisy adaptive systems together (both ultimately
+        derived from the same peak-channel-rate trend), undermining the
+        constant-observation-window guarantee this method exists to provide.
+        Using the fixed default instead restores that guarantee AND
+        strengthens it for a faint source specifically: since the actual
+        effective min_counts is always <= DEFAULT_ML_MIN_COUNTS, the
+        observation window becomes >= TARGET_TIME_S - strictly longer, never
+        shorter, exactly where "still acting too fast" was reported.
         
         Returns:
             int: the peak-single-channel-count threshold at which the survey
             buffer should auto-reset, recomputed fresh each call (once per
             poll tick).
         """
-        # Deliberately ABOVE min_counts, not equal to it - see
-        # HYSTERESIS_FLOOR_MULTIPLIER's docstring for why.
-        floor = self.ml_inference.get_min_counts() * self.HYSTERESIS_FLOOR_MULTIPLIER
-        
         if not self._peak_channel_rate_history:
             # No rate samples yet (e.g. the very first tick(s) of a fresh
-            # cycle) - fall back to the floor rather than a stale or zero
-            # threshold, so even the first reset happens at a sane,
-            # ML-pipeline-aligned bound.
-            return int(floor)
+            # cycle, where rate is undefined) - fall back to a small fixed
+            # margin above the default rather than a stale or zero
+            # threshold, so even the first reset happens at a sane bound.
+            # Only ever matters for a tick or two before the real formula
+            # above takes over.
+            return int(self.DEFAULT_ML_MIN_COUNTS * self.HYSTERESIS_FLOOR_MULTIPLIER)
         
         avg_peak_channel_rate = sum(self._peak_channel_rate_history) / len(self._peak_channel_rate_history)
-        proportional = avg_peak_channel_rate * self.HYSTERESIS_TARGET_TIME_S
-        return int(max(floor, min(proportional, self.HYSTERESIS_CEILING_COUNTS)))
+        threshold = self.DEFAULT_ML_MIN_COUNTS + (avg_peak_channel_rate * self.HYSTERESIS_TARGET_TIME_S)
+        return int(min(threshold, self.HYSTERESIS_CEILING_COUNTS))
+
+    def _compute_effective_ml_min_counts(self) -> int:
+        """See ML_TRIGGER_ABSOLUTE_FLOOR's docstring above for the full
+        reasoning. Reuses the same sliding-window peak-channel-rate history
+        as _compute_dynamic_hysteresis_threshold() (both track the same
+        underlying quantity), applied to a different formula:
+        
+            effective = clamp(ABSOLUTE_FLOOR, avg_peak_channel_rate *
+                               TIME_BUDGET_S, DEFAULT_ML_MIN_COUNTS)
+        
+        Only called in auto mode (see auto_hysteresis_enabled) - manual mode
+        applies the operator's slider value directly instead, with no
+        adaptation. A source fast enough to reach DEFAULT_ML_MIN_COUNTS
+        within TIME_BUDGET_S uses that full default unchanged (preserving
+        good statistics for already-fine sources); a slower one gets a
+        proportionally lower effective threshold, bounded below by
+        ABSOLUTE_FLOOR.
+        
+        Returns:
+            int: the min_counts value to apply to MlInference this tick.
+        """
+        if not self._peak_channel_rate_history:
+            # No rate samples yet - use the default directly rather than
+            # guessing; the real formula takes over from the next tick once
+            # a rate is known.
+            return self.DEFAULT_ML_MIN_COUNTS
+        
+        avg_peak_channel_rate = sum(self._peak_channel_rate_history) / len(self._peak_channel_rate_history)
+        rate_bounded = avg_peak_channel_rate * self.ML_TRIGGER_TIME_BUDGET_S
+        return int(max(self.ML_TRIGGER_ABSOLUTE_FLOOR, min(rate_bounded, self.DEFAULT_ML_MIN_COUNTS)))
 
 
     def start_batch_recording(self, target_time: int, total_runs: int, prefix: str):
