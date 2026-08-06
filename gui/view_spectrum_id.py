@@ -779,37 +779,48 @@ class ControlPanelSidebar:
                     on_change=self.trigger_threshold_change
                 ).props('color=primary').classes('w-full')
                 
-                # Controls MlInference's own internal gate (see
-                # set_ml_min_counts's docstring for how this differs from the
-                # removed min_counts_trigger) - the minimum peak count in a
-                # single channel, after background subtraction, before the ML
-                # pipeline attempts classification at all rather than
-                # returning "not enough counts".
-                initial_min_counts = self.service.ml_inference.get_min_counts()
-                self.min_counts_label = ui.label(f"ML pipeline single-channel trigger ({initial_min_counts} counts)").classes('text-xs text-zinc-700')
+                # Issue #38 (updated): a single "Automatic hysteresis" checkbox
+                # now governs BOTH the ML trigger threshold (min_counts) and
+                # the hysteresis reset threshold together, since they're
+                # deeply related (both computed from the same
+                # background-subtracted peak-channel rate trend). Checked
+                # (default): both are live, read-only, auto-computed values -
+                # the ML trigger adapts down for a faint source (see
+                # RIIDCoreService.ML_TRIGGER_ABSOLUTE_FLOOR) so it doesn't take
+                # minutes to first attempt a classification, while the reset
+                # threshold adapts to give a consistent observation window
+                # (see HYSTERESIS_TARGET_TIME_S). Unchecked: both become
+                # directly operator-set controls with no adaptation at all -
+                # what's shown always matches exactly what's applied, since
+                # there's no separate "target vs effective" distinction once
+                # adaptation is off.
+                self.auto_hysteresis_checkbox = ui.checkbox(
+                    'Automatic hysteresis', value=self.service.auto_hysteresis_enabled,
+                    on_change=self.trigger_auto_hysteresis_toggle
+                ).classes('text-xs text-zinc-700 font-medium')
+                
+                current_min_counts = self.service.ml_inference.get_min_counts()
+                self.min_counts_auto_label = ui.label(f"ML pipeline trigger (auto): {current_min_counts} counts").classes('text-xs text-zinc-700')
+                self.min_counts_label = ui.label(f"ML pipeline trigger: {current_min_counts} counts").classes('text-xs text-zinc-700')
                 self.min_counts_slider = ui.slider(
-                    min=1, max=200, step=1, value=initial_min_counts,
+                    min=1, max=200, step=1, value=current_min_counts,
                     on_change=self.trigger_min_counts_change
                 ).props('color=primary').classes('w-full')
                 
-                # Issue #38: peak-single-channel-based hysteresis auto-reset,
-                # enabled by default. The threshold is computed automatically
-                # each tick from the peak channel's own rate (see
-                # RIIDCoreService._compute_dynamic_hysteresis_threshold) - a
-                # read-only display while enabled. Unchecking reveals a manual
-                # numeric input instead, letting the operator set a fixed
-                # peak-single-channel-count threshold directly.
-                self.auto_hysteresis_checkbox = ui.checkbox(
-                    'Auto-reset hysteresis (peak-channel based)', value=self.service.auto_hysteresis_enabled,
-                    on_change=self.trigger_auto_hysteresis_toggle
-                ).classes('text-xs text-zinc-700 font-medium')
-                self.max_cnt_label = ui.label(f"Hysteresis reset (auto): {self.service.max_counts_limit:,} cts").classes('text-xs text-zinc-700')
-                self.max_cnt_input = ui.number(
-                    'Hysteresis Reset (peak-channel cts)', value=self.service.max_counts_limit, format='%d',
+                self.max_cnt_label = ui.label(f"Spectrum auto-reset (auto): {self.service.max_counts_limit:,} counts").classes('text-xs text-zinc-700')
+                self.max_cnt_manual_label = ui.label(f"Spectrum auto-reset: {self.service.max_counts_limit:,} counts").classes('text-xs text-zinc-700')
+                self.max_cnt_input = ui.slider(
+                    min=1, max=2000, step=1, value=self.service.max_counts_limit,
                     on_change=self.trigger_manual_hysteresis_change
-                ).classes('w-full text-xs').props('dense outlined')
-                self.max_cnt_label.set_visibility(self.service.auto_hysteresis_enabled)
-                self.max_cnt_input.set_visibility(not self.service.auto_hysteresis_enabled)
+                ).props('color=primary').classes('w-full')
+                
+                auto_enabled = self.service.auto_hysteresis_enabled
+                self.min_counts_auto_label.set_visibility(auto_enabled)
+                self.min_counts_label.set_visibility(not auto_enabled)
+                self.min_counts_slider.set_visibility(not auto_enabled)
+                self.max_cnt_label.set_visibility(auto_enabled)
+                self.max_cnt_manual_label.set_visibility(not auto_enabled)
+                self.max_cnt_input.set_visibility(not auto_enabled)
 
             # ============ LIVE SURVEY (primary workflow) ============
             # Directly below ML Pipeline Settings now that the diagnostic
@@ -905,30 +916,43 @@ class ControlPanelSidebar:
         self.service.set_ml_classification_threshold(new_threshold)
 
     def trigger_min_counts_change(self, e):
-        """Updates MlInference's minimum single-channel count required to
-        attempt classification, live as the slider moves - same not-gated-to-
-        idle reasoning as the threshold slider above."""
+        """Directly sets the ML pipeline's min_counts, live as the slider
+        moves - only usable in manual mode (see trigger_auto_hysteresis_toggle),
+        so this always takes effect immediately with no adaptation."""
         new_min_counts = int(e.value)
-        self.min_counts_label.set_text(f"ML pipeline single-channel trigger ({new_min_counts} counts)")
+        self.min_counts_label.set_text(f"ML pipeline trigger: {new_min_counts} counts")
         self.service.set_ml_min_counts(new_min_counts)
 
     def trigger_auto_hysteresis_toggle(self, e):
-        """Issue #38: switches between the automatic (default) and manual
-        hysteresis-reset modes, swapping which control is visible."""
+        """Issue #38 (updated): switches automatic mode for BOTH the ML
+        trigger threshold and the hysteresis reset threshold together,
+        swapping which controls are visible for each."""
         enabled = bool(e.value)
         self.service.set_auto_hysteresis_enabled(enabled)
+        
+        self.min_counts_auto_label.set_visibility(enabled)
+        self.min_counts_label.set_visibility(not enabled)
+        self.min_counts_slider.set_visibility(not enabled)
         self.max_cnt_label.set_visibility(enabled)
+        self.max_cnt_manual_label.set_visibility(not enabled)
         self.max_cnt_input.set_visibility(not enabled)
+        
         if not enabled:
-            # Seed the manual input with the last auto-computed value, rather
-            # than whatever stale number happened to be in the field before -
-            # a reasonable starting point for the operator to adjust from.
+            # Seed both manual controls with the last auto-computed value,
+            # rather than whatever stale number was last shown before - a
+            # reasonable starting point for the operator to adjust from.
+            current_min_counts = self.service.ml_inference.get_min_counts()
+            self.min_counts_slider.set_value(current_min_counts)
+            self.min_counts_label.set_text(f"ML pipeline trigger: {current_min_counts} counts")
             self.max_cnt_input.set_value(self.service.max_counts_limit)
+            self.max_cnt_manual_label.set_text(f"Spectrum auto-reset: {self.service.max_counts_limit:,} counts")
 
     def trigger_manual_hysteresis_change(self, e):
         """Issue #38: sets the operator's manual peak-single-channel-count
         threshold - only takes effect while auto-reset is disabled."""
-        self.service.set_manual_hysteresis_threshold(int(e.value or self.service.DEFAULT_MAX_COUNTS_LIMIT))
+        new_threshold = int(e.value or self.service.DEFAULT_MAX_COUNTS_LIMIT)
+        self.max_cnt_manual_label.set_text(f"Spectrum auto-reset: {new_threshold:,} counts")
+        self.service.set_manual_hysteresis_threshold(new_threshold)
 
     def trigger_bg(self):
         logger.warning(f"[USER_ACTION] Operator clicked RECORD BACKGROUND SPECTRUM button. Duration: {self.bg_time_input.value}s")
@@ -1050,19 +1074,30 @@ class ControlPanelSidebar:
             self.threshold_slider.set_value(current_threshold)
             self.threshold_label.set_text(f"Confidence Threshold ({current_threshold * 100:.1f}%)")
         
-        current_min_counts = self.service.ml_inference.get_min_counts()
-        if self.min_counts_slider.value != current_min_counts:
-            self.min_counts_slider.set_value(current_min_counts)
-            self.min_counts_label.set_text(f"ML pipeline single-channel trigger ({current_min_counts} counts)")
-        
         current_auto_enabled = self.service.auto_hysteresis_enabled
         if self.auto_hysteresis_checkbox.value != current_auto_enabled:
             self.auto_hysteresis_checkbox.set_value(current_auto_enabled)
+            self.min_counts_auto_label.set_visibility(current_auto_enabled)
+            self.min_counts_label.set_visibility(not current_auto_enabled)
+            self.min_counts_slider.set_visibility(not current_auto_enabled)
             self.max_cnt_label.set_visibility(current_auto_enabled)
+            self.max_cnt_manual_label.set_visibility(not current_auto_enabled)
             self.max_cnt_input.set_visibility(not current_auto_enabled)
+        
+        # get_min_counts() is always the current, accurate value regardless
+        # of mode - auto-computed each tick in auto mode, directly
+        # operator-set in manual mode (see set_ml_min_counts). Update
+        # whichever display is relevant for the current mode.
+        current_min_counts = self.service.ml_inference.get_min_counts()
+        if current_auto_enabled:
+            self.min_counts_auto_label.set_text(f"ML pipeline trigger (auto): {current_min_counts} counts")
+        elif self.min_counts_slider.value != current_min_counts:
+            self.min_counts_slider.set_value(current_min_counts)
+            self.min_counts_label.set_text(f"ML pipeline trigger: {current_min_counts} counts")
         
         if not current_auto_enabled and self.max_cnt_input.value != self.service.max_counts_limit:
             self.max_cnt_input.set_value(self.service.max_counts_limit)
+            self.max_cnt_manual_label.set_text(f"Spectrum auto-reset: {self.service.max_counts_limit:,} counts")
 
         # Issue #38: reflects the backend's current dynamically-computed
         # hysteresis threshold - only actually changes while a survey is
@@ -1072,7 +1107,7 @@ class ControlPanelSidebar:
         # (auto mode's read-only display) - the manual input, when visible,
         # holds the operator's own value and isn't touched here.
         if self.service.auto_hysteresis_enabled:
-            self.max_cnt_label.set_text(f"Hysteresis reset (auto): {self.service.max_counts_limit:,} cts")
+            self.max_cnt_label.set_text(f"Spectrum auto-reset (auto): {self.service.max_counts_limit:,} counts")
 
         # Calculate exact Counts Per Second (CPS) metrics based directly on MCA hardware live-time
         if is_survey_running and self.service.live_spectrum:
