@@ -33,7 +33,7 @@ class RIIDCoreService:
     # here (initial state) and by the view layer's widget-creation/fallback-
     # parsing code, instead of each place re-typing its own copy of the same
     # number (which had already drifted out of sync in a couple of spots).
-    DEFAULT_MAX_COUNTS_LIMIT = 1000
+    DEFAULT_MAX_COUNTS_LIMIT = 15000
     DEFAULT_BG_TARGET_TIME_S = 300
     DEFAULT_BATCH_TARGET_TIME_S = 300
     DEFAULT_BATCH_TOTAL_RUNS = 1
@@ -567,6 +567,19 @@ class RIIDCoreService:
             # Snapshot whatever was accumulated before this start - $AQ is about to wipe
             # the physical BRAM out from under us regardless of what we do here.
             previous_spectrum = list(self.live_spectrum) if self.live_spectrum else []
+            
+            if not previous_spectrum:
+                # Genuinely fresh start (nothing to resume) - explicitly zero
+                # the hardware live-time timer here. Without this, the FIRST
+                # survey start in a fresh app session could silently inherit
+                # whatever value Timer C already happened to be at (e.g. left
+                # running from before this app even connected to the board),
+                # showing a nonzero LIVE TIME immediately after pressing
+                # START. The "timer persists across STOP -> START" design
+                # documented above is correct for an actual resume - it just
+                # assumes a known-zero baseline was established at least
+                # once first, which this establishes.
+                self.daq_device.timers_reset()
             
             self.daq_device.data_acquisition_start()
             
