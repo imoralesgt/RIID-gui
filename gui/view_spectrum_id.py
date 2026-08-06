@@ -1031,6 +1031,39 @@ class ControlPanelSidebar:
         hw_ok = self.service.is_hardware_available
         has_bg = len(self.service.background_spectrum) > 0
 
+        # Multi-client sync: this app can have several clients connected at
+        # once (e.g. a phone and a desktop both viewing the same
+        # instrument) - they all share the SAME backend_service singleton,
+        # so a change made on one device already takes effect correctly in
+        # the backend immediately. What was missing is the other direction:
+        # each device's own slider/checkbox widgets were only ever PUSHED to
+        # the backend via their own on_change handlers, never PULLED back
+        # into sync with a change made from a different device - so a
+        # threshold changed on device A took effect, but device B's slider
+        # kept showing its own stale position indefinitely. Comparing before
+        # calling set_value() avoids fighting an in-progress drag on this
+        # same device (on_change only fires once a drag releases, so the
+        # backend value can't change mid-drag anyway) and avoids
+        # unnecessary re-renders when nothing has actually changed.
+        current_threshold = self.service.ml_inference.CLASSIFICATION_THRESHOLD
+        if abs(self.threshold_slider.value - current_threshold) > 1e-6:
+            self.threshold_slider.set_value(current_threshold)
+            self.threshold_label.set_text(f"Confidence Threshold ({current_threshold * 100:.1f}%)")
+        
+        current_min_counts = self.service.ml_inference.get_min_counts()
+        if self.min_counts_slider.value != current_min_counts:
+            self.min_counts_slider.set_value(current_min_counts)
+            self.min_counts_label.set_text(f"ML pipeline single-channel trigger ({current_min_counts} counts)")
+        
+        current_auto_enabled = self.service.auto_hysteresis_enabled
+        if self.auto_hysteresis_checkbox.value != current_auto_enabled:
+            self.auto_hysteresis_checkbox.set_value(current_auto_enabled)
+            self.max_cnt_label.set_visibility(current_auto_enabled)
+            self.max_cnt_input.set_visibility(not current_auto_enabled)
+        
+        if not current_auto_enabled and self.max_cnt_input.value != self.service.max_counts_limit:
+            self.max_cnt_input.set_value(self.service.max_counts_limit)
+
         # Issue #38: reflects the backend's current dynamically-computed
         # hysteresis threshold - only actually changes while a survey is
         # running (that's the only time _compute_dynamic_hysteresis_threshold
