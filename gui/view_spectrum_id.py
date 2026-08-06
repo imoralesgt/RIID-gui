@@ -21,26 +21,26 @@ class SpectrumPlotContainer:
         # Replaces the old single "ID: ..." banner - the same information
         # (current status / detected isotopes) now lives in the first card,
         # alongside confidence, live time, and the active model name.
-        with ui.row().classes('w-full gap-2'):
+        with ui.row().classes('w-full gap-2 riid-metric-cards-row'):
             self.metric_isotopes_val = self._build_metric_card('Detected Isotopes')
             self.metric_confidence_val = self._build_metric_card('Avg Confidence')
             self.metric_livetime_val = self._build_metric_card('Live Time')
             # Issue #67: was a static label, now a live model-switcher. Enabled
             # only while idle (see update_ui_elements) - switching models
             # mid-survey would produce a confusing mix of old/new-model results.
-            with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
+            with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0 riid-metric-card').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
                 self.model_select = ui.select(
                     {'cnn_multilabel': 'cnn_multilabel', 'cnn_deep': 'cnn_deep'},
                     value=getattr(self.service, 'ml_model_name', 'cnn_multilabel'),
                     on_change=self.trigger_model_change
-                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0; line-height: 1.2;')
+                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg riid-metric-value').style('min-width: 0; margin: 0; line-height: 1.2;')
                 ui.label('ML MODEL').classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         
         # ============ MAIN CONTENT: spectrum (left) + RIID results (right) ============
         # 65/35 split (was 50/50) - the spectrum reads better with more room,
         # while the results panel still has enough width for the class
         # probability bars and count-rate plot.
-        with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2'):
+        with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2 riid-spectrum-split-row'):
             with ui.column().classes('rounded-lg border bg-white p-2 gap-1').style('width: 65%; border-color: #E2E8F0;'):
                 with ui.row().classes('w-full justify-between items-center px-1 flex-wrap'):
                     self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
@@ -113,8 +113,8 @@ class SpectrumPlotContainer:
         #67 follow-up) so all four cards in the row - including the ML Model
         select, which has its own internal Quasar sizing quirks - line up
         uniformly regardless of what each one's content naturally wants."""
-        with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
-            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151; line-height: 1.2;')
+        with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0 riid-metric-card').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
+            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full riid-metric-value').style('overflow-wrap: break-word; color: #374151; line-height: 1.2;')
             ui.label(label.upper()).classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         return value_lbl
 
@@ -829,9 +829,9 @@ class ControlPanelSidebar:
                 
                 with ui.row().classes('w-full gap-2 no-wrap pt-1') as self.live_survey_controls_row:
                     self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
-                    self.play_stop_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
+                    self.play_stop_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5 text-xs')
                     self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
-                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
+                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5 text-xs')
 
                 # Issue #41: bundles the last spectrum shown here with the current
                 # background into a downloadable .zip (both in .json and .spe).
@@ -1030,6 +1030,39 @@ class ControlPanelSidebar:
         is_survey_running = self.service.state == 'ACQUIRING_SURVEY'
         hw_ok = self.service.is_hardware_available
         has_bg = len(self.service.background_spectrum) > 0
+
+        # Multi-client sync: this app can have several clients connected at
+        # once (e.g. a phone and a desktop both viewing the same
+        # instrument) - they all share the SAME backend_service singleton,
+        # so a change made on one device already takes effect correctly in
+        # the backend immediately. What was missing is the other direction:
+        # each device's own slider/checkbox widgets were only ever PUSHED to
+        # the backend via their own on_change handlers, never PULLED back
+        # into sync with a change made from a different device - so a
+        # threshold changed on device A took effect, but device B's slider
+        # kept showing its own stale position indefinitely. Comparing before
+        # calling set_value() avoids fighting an in-progress drag on this
+        # same device (on_change only fires once a drag releases, so the
+        # backend value can't change mid-drag anyway) and avoids
+        # unnecessary re-renders when nothing has actually changed.
+        current_threshold = self.service.ml_inference.CLASSIFICATION_THRESHOLD
+        if abs(self.threshold_slider.value - current_threshold) > 1e-6:
+            self.threshold_slider.set_value(current_threshold)
+            self.threshold_label.set_text(f"Confidence Threshold ({current_threshold * 100:.1f}%)")
+        
+        current_min_counts = self.service.ml_inference.get_min_counts()
+        if self.min_counts_slider.value != current_min_counts:
+            self.min_counts_slider.set_value(current_min_counts)
+            self.min_counts_label.set_text(f"ML pipeline single-channel trigger ({current_min_counts} counts)")
+        
+        current_auto_enabled = self.service.auto_hysteresis_enabled
+        if self.auto_hysteresis_checkbox.value != current_auto_enabled:
+            self.auto_hysteresis_checkbox.set_value(current_auto_enabled)
+            self.max_cnt_label.set_visibility(current_auto_enabled)
+            self.max_cnt_input.set_visibility(not current_auto_enabled)
+        
+        if not current_auto_enabled and self.max_cnt_input.value != self.service.max_counts_limit:
+            self.max_cnt_input.set_value(self.service.max_counts_limit)
 
         # Issue #38: reflects the backend's current dynamically-computed
         # hysteresis threshold - only actually changes while a survey is

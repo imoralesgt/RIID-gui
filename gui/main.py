@@ -73,9 +73,73 @@ class RIIDSpectroscopyApp:
         logger.info(f"[UI_TITLE] Re-evaluating client window title properties. Applied Title: {new_title}")
         ui.run_javascript(f"document.title = '{new_title}';")
 
+    def _inject_responsive_styles(self):
+        """Mobile-landscape responsive overrides, kept separate from
+        build_workspace so that method stays focused on the actual container
+        tree rather than growing with embedded CSS.
+        
+        Gated to a 600px-1024px viewport WIDTH range, not an
+        `orientation: landscape` media query - that was tried first, but
+        proved unreliable on at least one real device: without a correctly-
+        reported viewport, some mobile browsers fall back to treating the
+        page as if it were a ~980px-wide desktop page and scale it down,
+        which can make `orientation` report inconsistently with the phone's
+        actual physical orientation. A width range doesn't have that
+        problem: a phone in landscape reliably reports a viewport in the
+        ~600-1024px range; the same phone in portrait reliably reports
+        ~360-430px, comfortably below this range's floor - so this still
+        distinguishes the two cases, just without relying on `orientation`
+        at all. The explicit viewport meta tag below is a second, defensive
+        measure toward the same end: making sure the browser reports the
+        page's true device-width viewport in the first place, rather than a
+        virtual one, which matters for any width-based media query here.
+        
+        Also still gated to max-width:1024px so this never applies on
+        desktop monitors (typically 1280px+). The desktop layout (the fixed
+        72/28 and 65/35 percentage splits) is completely untouched outside
+        this range.
+        
+        The root problem on a narrow-but-landscape phone: those percentage
+        splits leave each side with too few actual pixels once the viewport
+        itself is only ~850-930px wide (vs. ~1600px+ on desktop) - the metric
+        cards' text wraps to 2-3 lines and the count-rate plot renders
+        squished because Plotly is laying out its axes/legend within a
+        container barely wide enough for a third of a normal desktop plot.
+        Stacking these rows vertically instead gives each section the FULL
+        viewport width to render in, rather than a shrinking fraction of one."""
+        ui.add_head_html('<meta name="viewport" content="width=device-width, initial-scale=1">')
+        ui.add_head_html('''
+        <style>
+        @media (min-width: 600px) and (max-width: 1024px) {
+            .riid-main-split-row, .riid-spectrum-split-row {
+                flex-direction: column !important;
+            }
+            .riid-main-split-row > *, .riid-spectrum-split-row > * {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            .riid-metric-cards-row {
+                flex-wrap: wrap !important;
+            }
+            .riid-metric-card {
+                flex: 1 1 45% !important;
+                min-width: 45% !important;
+                height: auto !important;
+                min-height: 56px !important;
+                padding-top: 6px !important;
+                padding-bottom: 6px !important;
+            }
+            .riid-metric-value {
+                font-size: 0.95rem !important;
+            }
+        }
+        </style>
+        ''')
+
     def build_workspace(self):
         """Constructs the visual container tree utilizing official palettes."""
         ui.colors(primary=BRAND_COLORS['primary'], secondary=BRAND_COLORS['secondary'])
+        self._inject_responsive_styles()
         
         # Outer column spans the full viewport (so the workspace background color
         # still reaches the browser edges), while the inner column caps and
@@ -136,7 +200,7 @@ class RIIDSpectroscopyApp:
                 # Dynamic Content Panel Frames Container
                 with ui.tab_panels(self.main_tabs, value=initial_tab).classes('w-full bg-transparent p-0 flex-1') as self.tab_panels:
                     with ui.tab_panel(self.tab_id).classes('p-0 m-0 bg-transparent'):
-                        with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
+                        with ui.row().classes('w-full gap-3 items-stretch no-wrap riid-main-split-row'):
                             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3 flex-1').style('width: 72%; border-color: #E2E8F0;'):
                                 self.plot_view = SpectrumPlotContainer(backend_service)
                             with ui.card().classes('p-4 rounded-lg border shadow-md bg-white gap-3').style('width: 28%; max-width: 340px; border-color: #E2E8F0;'):
