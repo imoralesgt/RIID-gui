@@ -44,6 +44,48 @@ class RIIDCoreService:
     # set_ml_model), now a single source of truth referenced by both.
     DEFAULT_ML_MIN_COUNTS = 20
 
+    # Issue #38 (updated): dynamic hysteresis (auto-reset) model, replacing
+    # the old static total-count threshold. That static value caused two
+    # opposite problems reported in practice: a high-activity source (e.g.
+    # Eu-152) could hit it in ~1s, forcing a reset every 1-3s - too fast to
+    # read a result or accumulate meaningful statistics - while a low-activity
+    # source (e.g. a weak Cs-137) could take several minutes to reach the
+    # same static count, far past any reasonable identification latency.
+    #
+    # Uses the PEAK SINGLE CHANNEL count of the background-subtracted
+    # spectrum - the exact same metric MlInference.inference_pipeline() itself
+    # checks against min_counts before attempting classification at all - not
+    # the total/integral spectrum count. This keeps the auto-reset directly
+    # aligned with when the ML pipeline can actually produce a real result,
+    # rather than a proxy (total counts) that only loosely correlates with it.
+    #
+    # Model: threshold(peak_ch_rate) = clamp(FLOOR, avg_peak_ch_rate *
+    # TARGET_TIME_S, CEILING), where avg_peak_ch_rate is a SLIDING WINDOW
+    # average of the peak channel's recent instantaneous rate (the last
+    # HYSTERESIS_WINDOW_SAMPLES samples, ~1 per second) - not a cumulative
+    # average since the last reset. A cumulative average gets progressively
+    # more sluggish to react the longer a session runs, since old samples
+    # increasingly dominate it; a sliding window stays equally responsive to a
+    # genuine rate change (e.g. a source being moved closer) no matter how
+    # long the current cycle has been running.
+    HYSTERESIS_TARGET_TIME_S = 20.0
+    # Number of recent instantaneous peak-channel-rate samples (~1/s) averaged
+    # for the sliding-window rate estimate.
+    HYSTERESIS_WINDOW_SAMPLES = 5
+    # FLOOR = min_counts * this multiplier - deliberately ABOVE the ML
+    # pipeline's own min_counts, not equal to it. At exactly min_counts, a
+    # faint source would trigger a reset the instant the ML pipeline could
+    # just barely attempt a classification, leaving the operator almost no
+    # time to actually read the result before it's cleared. A small margin
+    # (per the requirement, ~1.1-1.2x) keeps the buffer alive a bit past that
+    # point instead.
+    HYSTERESIS_FLOOR_MULTIPLIER = 1.15
+    # A single channel reaching this is implausible even at very high total
+    # count rates - a photopeak typically captures only a modest fraction of
+    # total counts - so this is a generous safety cap, not something normal
+    # operation should ever actually reach.
+    HYSTERESIS_CEILING_COUNTS = 50_000
+
     def __init__(self, ml_model_name : str):
         logger.info("[SERVICE_INIT] Initializing spectroscopy operations hub...")
         self.system = SpectrumAcquisitionSystem()
@@ -63,6 +105,11 @@ class RIIDCoreService:
         
         # Trigger thresholds for automated identification pipelines
         self.max_counts_limit = self.DEFAULT_MAX_COUNTS_LIMIT
+        # Issue #38: enabled by default (dynamic peak-channel-based auto-reset).
+        # When disabled, max_counts_limit above is used directly as a manually-
+        # set threshold instead - still compared against the peak single
+        # channel, never the integral spectrum count, in either mode.
+        self.auto_hysteresis_enabled = True
         
         # Spectrum plot display preference - was previously only created lazily
         # by the view layer (ControlPanelSidebar's __init__), which broke once
@@ -137,6 +184,17 @@ class RIIDCoreService:
         # connected in array order, not sorted by x). Reset only by
         # clear_cps_history() - the same explicit action that clears the history.
         self._cps_history_time_offset_s = 0.0
+        
+        # Issue #38: sliding window of recent instantaneous peak-channel-rate
+        # samples (background-subtracted spectrum), used by
+        # _compute_dynamic_hysteresis_threshold() - deliberately NOT reset on
+        # an automatic hysteresis-cycle reset (only by clear_cps_history(),
+        # alongside cps_history above), so the rate estimate stays continuous
+        # across reset boundaries instead of collapsing back to empty every
+        # ~20s and forcing the threshold down to the floor until it refills.
+        self._peak_channel_rate_history = deque(maxlen=self.HYSTERESIS_WINDOW_SAMPLES)
+        self._prev_peak_channel_value = 0.0
+        self._prev_peak_channel_elapsed_s = 0.0
         
         # Tracks whether the last survey was halted by the operator (STOP) while
         # holding valid spectrum data, so the plot can keep rendering it "frozen"
@@ -510,6 +568,19 @@ class RIIDCoreService:
             # the physical BRAM out from under us regardless of what we do here.
             previous_spectrum = list(self.live_spectrum) if self.live_spectrum else []
             
+            if not previous_spectrum:
+                # Genuinely fresh start (nothing to resume) - explicitly zero
+                # the hardware live-time timer here. Without this, the FIRST
+                # survey start in a fresh app session could silently inherit
+                # whatever value Timer C already happened to be at (e.g. left
+                # running from before this app even connected to the board),
+                # showing a nonzero LIVE TIME immediately after pressing
+                # START. The "timer persists across STOP -> START" design
+                # documented above is correct for an actual resume - it just
+                # assumes a known-zero baseline was established at least
+                # once first, which this establishes.
+                self.daq_device.timers_reset()
+            
             self.daq_device.data_acquisition_start()
             
             if previous_spectrum:
@@ -597,8 +668,47 @@ class RIIDCoreService:
                 self._prev_survey_counts = total_counts
                 self._prev_survey_elapsed_s = live_time_s
                 
-                if total_counts >= self.max_counts_limit:
-                    logger.warning(f"[SURVEY_RUN] Counts [{total_counts}] hit ceiling [{self.max_counts_limit}]. Resetting on-board buffer (no DPP resend)...")
+                # Issue #38 (updated): the auto-reset trigger is now the PEAK
+                # SINGLE CHANNEL of the background-subtracted spectrum - the
+                # exact same metric MlInference itself checks against
+                # min_counts before attempting classification - not the
+                # total/integral spectrum count used previously. Reuses
+                # compute_background_subtracted_spectrum() (the same method
+                # backing the "Spectrum - Background" visualization) rather
+                # than a separate implementation.
+                default_bg_ms = self.DEFAULT_BG_TARGET_TIME_S * 1000
+                bg_ms = float(getattr(self, 'bg_hardware_live_time_ms', default_bg_ms) or default_bg_ms)
+                subtracted_spectrum = self.compute_background_subtracted_spectrum(
+                    spectrum_data=self.live_spectrum, spectrum_live_time_s=live_time_s,
+                    bg_data=self.background_spectrum, bg_live_time_s=bg_ms / 1000.0
+                )
+                peak_channel_value = float(max(subtracted_spectrum)) if subtracted_spectrum else 0.0
+                
+                # Issue #38: sliding-window instantaneous rate sample (counts
+                # accumulated in the peak channel SINCE the last poll, divided
+                # by the time since that poll) - the same delta-based pattern
+                # cps_history above uses, so the rate estimate stays reactive
+                # to a genuine change instead of a cumulative average that
+                # gets progressively more sluggish the longer the cycle runs.
+                delta_peak = peak_channel_value - self._prev_peak_channel_value
+                delta_time_peak = live_time_s - self._prev_peak_channel_elapsed_s
+                if delta_time_peak > 0:
+                    instantaneous_peak_rate = max(delta_peak, 0) / delta_time_peak
+                    self._peak_channel_rate_history.append(instantaneous_peak_rate)
+                self._prev_peak_channel_value = peak_channel_value
+                self._prev_peak_channel_elapsed_s = live_time_s
+                
+                if self.auto_hysteresis_enabled:
+                    # Recomputed every tick and stored back into
+                    # max_counts_limit, so the sidebar's read-only display (and
+                    # any other code reading this attribute) shows the CURRENT
+                    # effective value, not a stale one.
+                    self.max_counts_limit = self._compute_dynamic_hysteresis_threshold()
+                effective_threshold = self.max_counts_limit
+                
+                if peak_channel_value >= effective_threshold:
+                    mode_label = "auto" if self.auto_hysteresis_enabled else "manual"
+                    logger.warning(f"[SURVEY_RUN] Peak channel [{peak_channel_value:.0f} cts] hit hysteresis threshold [{effective_threshold} cts] ({mode_label}). Resetting on-board buffer (no DPP resend)...")
                     
                     try: self.daq_device.data_acquisition_stop()
                     except: pass
@@ -619,6 +729,8 @@ class RIIDCoreService:
                     self.survey_hardware_real_time_ms = 0.0
                     self._prev_survey_counts = 0
                     self._prev_survey_elapsed_s = 0.0
+                    self._prev_peak_channel_value = 0.0
+                    self._prev_peak_channel_elapsed_s = 0.0
                     self.current_isotope_id = "Buffer Reset. Re-accumulating..."
                     continue
                 
@@ -706,6 +818,18 @@ class RIIDCoreService:
         whether _execute_ml_pipeline() got called at all, and has since been
         removed entirely (inference is now always attempted every tick)."""
         self.ml_inference.update_min_counts(int(new_min_counts))
+
+    def set_auto_hysteresis_enabled(self, enabled: bool):
+        """Issue #38: toggles between the dynamic peak-channel-based auto-reset
+        (default) and a manually-set threshold, called by the GUI's auto-reset
+        checkbox."""
+        self.auto_hysteresis_enabled = bool(enabled)
+        logger.warning(f"[USER_ACTION] Operator {'enabled' if enabled else 'disabled'} automatic hysteresis reset.")
+
+    def set_manual_hysteresis_threshold(self, new_threshold: int):
+        """Issue #38: sets the operator's manual peak-single-channel-count
+        threshold, used only while auto_hysteresis_enabled is False."""
+        self.max_counts_limit = int(new_threshold)
 
     def set_ml_model(self, model_name: str) -> tuple:
         """Issue #67: swaps the active ML model at runtime (cnn_multilabel /
@@ -810,7 +934,41 @@ class RIIDCoreService:
         self._prev_bg_counts = 0
         self._prev_bg_elapsed_s = 0.0
         self._cps_history_time_offset_s = 0.0
+        # Issue #38: same explicit-clear-only rule as cps_history above - an
+        # automatic hysteresis-cycle reset leaves this alone (see the
+        # buffer-reset branch), only an explicit CLEAR/RESTART wipes it.
+        self._peak_channel_rate_history.clear()
+        self._prev_peak_channel_value = 0.0
+        self._prev_peak_channel_elapsed_s = 0.0
         logger.warning("[USER_ACTION] Operator cleared the count-rate plot history.")
+
+    def _compute_dynamic_hysteresis_threshold(self) -> int:
+        """Issue #38 (updated): see the HYSTERESIS_* class constants above for
+        the full reasoning. Averages the sliding window of recent
+        instantaneous peak-channel-rate samples (self._peak_channel_rate_history,
+        populated once per poll tick in _continuous_survey_sequence) rather
+        than a cumulative average, so the estimate stays reactive to a
+        genuine rate change no matter how long the current cycle has run.
+        
+        Returns:
+            int: the peak-single-channel-count threshold at which the survey
+            buffer should auto-reset, recomputed fresh each call (once per
+            poll tick).
+        """
+        # Deliberately ABOVE min_counts, not equal to it - see
+        # HYSTERESIS_FLOOR_MULTIPLIER's docstring for why.
+        floor = self.ml_inference.get_min_counts() * self.HYSTERESIS_FLOOR_MULTIPLIER
+        
+        if not self._peak_channel_rate_history:
+            # No rate samples yet (e.g. the very first tick(s) of a fresh
+            # cycle) - fall back to the floor rather than a stale or zero
+            # threshold, so even the first reset happens at a sane,
+            # ML-pipeline-aligned bound.
+            return int(floor)
+        
+        avg_peak_channel_rate = sum(self._peak_channel_rate_history) / len(self._peak_channel_rate_history)
+        proportional = avg_peak_channel_rate * self.HYSTERESIS_TARGET_TIME_S
+        return int(max(floor, min(proportional, self.HYSTERESIS_CEILING_COUNTS)))
 
 
     def start_batch_recording(self, target_time: int, total_runs: int, prefix: str):
