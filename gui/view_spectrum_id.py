@@ -21,26 +21,26 @@ class SpectrumPlotContainer:
         # Replaces the old single "ID: ..." banner - the same information
         # (current status / detected isotopes) now lives in the first card,
         # alongside confidence, live time, and the active model name.
-        with ui.row().classes('w-full gap-2'):
+        with ui.row().classes('w-full gap-2 riid-metric-cards-row'):
             self.metric_isotopes_val = self._build_metric_card('Detected Isotopes')
             self.metric_confidence_val = self._build_metric_card('Avg Confidence')
             self.metric_livetime_val = self._build_metric_card('Live Time')
             # Issue #67: was a static label, now a live model-switcher. Enabled
             # only while idle (see update_ui_elements) - switching models
             # mid-survey would produce a confusing mix of old/new-model results.
-            with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
+            with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0 riid-metric-card').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
                 self.model_select = ui.select(
                     {'cnn_multilabel': 'cnn_multilabel', 'cnn_deep': 'cnn_deep'},
                     value=getattr(self.service, 'ml_model_name', 'cnn_multilabel'),
                     on_change=self.trigger_model_change
-                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg').style('min-width: 0; margin: 0; line-height: 1.2;')
+                ).props('dense borderless options-dense hide-bottom-space').classes('text-center font-black text-lg riid-metric-value').style('min-width: 0; margin: 0; line-height: 1.2;')
                 ui.label('ML MODEL').classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         
         # ============ MAIN CONTENT: spectrum (left) + RIID results (right) ============
         # 65/35 split (was 50/50) - the spectrum reads better with more room,
         # while the results panel still has enough width for the class
         # probability bars and count-rate plot.
-        with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2'):
+        with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2 riid-spectrum-split-row'):
             with ui.column().classes('rounded-lg border bg-white p-2 gap-1').style('width: 65%; border-color: #E2E8F0;'):
                 with ui.row().classes('w-full justify-between items-center px-1 flex-wrap'):
                     self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
@@ -113,8 +113,8 @@ class SpectrumPlotContainer:
         #67 follow-up) so all four cards in the row - including the ML Model
         select, which has its own internal Quasar sizing quirks - line up
         uniformly regardless of what each one's content naturally wants."""
-        with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
-            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full').style('overflow-wrap: break-word; color: #374151; line-height: 1.2;')
+        with ui.column().classes('flex-1 items-center justify-center p-2 rounded-lg border bg-white gap-0 riid-metric-card').style('border-color: #E2E8F0; min-width: 0; height: 64px;'):
+            value_lbl = ui.label('--').classes('text-lg font-black text-center w-full riid-metric-value').style('overflow-wrap: break-word; color: #374151; line-height: 1.2;')
             ui.label(label.upper()).classes('text-[10px] text-zinc-500 uppercase tracking-wide text-center')
         return value_lbl
 
@@ -829,9 +829,9 @@ class ControlPanelSidebar:
                 
                 with ui.row().classes('w-full gap-2 no-wrap pt-1') as self.live_survey_controls_row:
                     self.play_stop_btn = ui.button('START', icon='play_arrow', on_click=self.trigger_play_stop_toggle)
-                    self.play_stop_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5')
+                    self.play_stop_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5 text-xs')
                     self.clear_btn = ui.button('RESTART', icon='restart_alt', on_click=self.trigger_clear)
-                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5')
+                    self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5 text-xs')
 
                 # Issue #41: bundles the last spectrum shown here with the current
                 # background into a downloadable .zip (both in .json and .spe).
