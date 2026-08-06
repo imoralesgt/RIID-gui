@@ -4,6 +4,7 @@ import io
 import zipfile
 import tempfile
 import asyncio
+import threading
 from collections import deque
 from datetime import datetime, timezone
 from config import logger, SPECTRA_BATCH_DIR, SPECTRA_BACKGROUND_DIR, SPECTRA_RIID_DIR
@@ -77,9 +78,9 @@ class RIIDCoreService:
     # faint source would trigger a reset the instant the ML pipeline could
     # just barely attempt a classification, leaving the operator almost no
     # time to actually read the result before it's cleared. A small margin
-    # (per the requirement, ~1.1-1.2x) keeps the buffer alive a bit past that
+    # (~1.2x) keeps the buffer alive a bit past that
     # point instead.
-    HYSTERESIS_FLOOR_MULTIPLIER = 1.15
+    HYSTERESIS_FLOOR_MULTIPLIER = 1.2
     # A single channel reaching this is implausible even at very high total
     # count rates - a photopeak typically captures only a modest fraction of
     # total counts - so this is a generous safety cap, not something normal
@@ -93,6 +94,10 @@ class RIIDCoreService:
         
         # Shared authoritative singleton hardware controller instance anchor
         self.daq_device = None
+        # Guards every actual self.daq_device.* call (see _call_hw's
+        # docstring for why this needs to be a real threading.Lock, not
+        # asyncio.Lock).
+        self._hw_lock = threading.Lock()
         
         # Operational State Flags
         self.state = 'IDLE'
@@ -213,6 +218,34 @@ class RIIDCoreService:
         # ML inference model
         self.ml_inference = MlInference(ml_model_name = ml_model_name, min_counts = self.DEFAULT_ML_MIN_COUNTS)
 
+    def _call_hw(self, func, *args, **kwargs):
+        """Thread-safe wrapper around a single hardware call - always used as
+        the target of asyncio.to_thread(self._call_hw, self.daq_device.X, ...)
+        rather than calling self.daq_device.X directly.
+        
+        Exists specifically because asyncio task cancellation (e.g. the
+        operator pressing STOP mid-poll, which cancels the running loop's
+        task) cannot forcibly stop a worker thread that's already executing
+        inside a prior asyncio.to_thread() call - Python has no mechanism to
+        kill a running thread from outside. The orphaned thread keeps running
+        the original call to completion, even after the cancelled coroutine
+        has already moved on to its own finally block and wants to issue a
+        NEW hardware call (e.g. data_acquisition_stop() during cleanup). That
+        means two threads could end up touching the same serial port object
+        at the same time, which pyserial does not support safely.
+        
+        An asyncio.Lock would NOT fix this - it only serializes coroutines
+        that are awaiting it at the asyncio level, and has no power over an
+        OS thread that's already running independently of the event loop. A
+        real threading.Lock, acquired here INSIDE the worker thread itself,
+        enforces true mutual exclusion regardless of any asyncio-level
+        cancellation timing: the second call simply blocks (on the thread
+        pool's own worker thread, not the event loop) until the first one
+        actually finishes.
+        """
+        with self._hw_lock:
+            return func(*args, **kwargs)
+
     def reinitialize_daq_handle(self):
         """Destroys any stale driver reference and instantiates a fresh one, transmitting
         the CURRENT calibration/DPP profile (tau_d, tau_r, shaper timings, VGA gain, BLR
@@ -234,7 +267,7 @@ class RIIDCoreService:
         
         if self.daq_device is not None:
             try:
-                self.daq_device.close()
+                self._call_hw(self.daq_device.close)
             except:
                 pass
             self.daq_device = None
@@ -279,12 +312,12 @@ class RIIDCoreService:
         logger.info("[MCA_PROG] Broadcasting parameter block matrix down to board submodules...")
         try:
             self.reinitialize_daq_handle()
-            self.daq_device.open()
+            self._call_hw(self.daq_device.open)
             # A freshly-programmed board implies a freshly-cleared accumulator; keep the
             # on-chip registers and the software-side survey bookkeeping in sync.
-            self.daq_device.clear_spectrum()
-            self.daq_device.timers_reset()
-            self.daq_device.close()
+            self._call_hw(self.daq_device.clear_spectrum)
+            self._call_hw(self.daq_device.timers_reset)
+            self._call_hw(self.daq_device.close)
             
             self.live_spectrum = []
             self.survey_elapsed_seconds = 0
@@ -398,7 +431,15 @@ class RIIDCoreService:
         """Asynchronous worker for collecting background spectrum matrix arrays with accurate hardware live-time capture.
         Reuses the already-programmed device handle (see push_active_profile_to_board) -
         no DPP parameters are resent here. The on-board register clear below is specific
-        to starting a fresh background capture and is unrelated to DPP programming."""
+        to starting a fresh background capture and is unrelated to DPP programming.
+        
+        Every self.daq_device.* call below is offloaded via asyncio.to_thread() -
+        these are synchronous serial I/O calls (each can take up to the port's
+        own ~0.8s timeout), and without offloading them they'd block the
+        entire asyncio event loop for their full duration on every single poll
+        tick - including the UI's own 1-second tick timer, which is what was
+        actually causing GUI updates to visibly lag behind their intended 1s
+        cadence during any active DAQ operation."""
         logger.info("[BACKGROUND_RUN] Async recording pipeline worker mounting...")
         if self.daq_device is None:
             logger.error("[BACKGROUND_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
@@ -417,10 +458,10 @@ class RIIDCoreService:
         bg_live_time_s = 0.0
         
         try:
-            self.daq_device.open()
-            self.daq_device.clear_spectrum()
-            self.daq_device.timers_reset()
-            self.daq_device.data_acquisition_start()
+            await asyncio.to_thread(self._call_hw, self.daq_device.open)
+            await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+            await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
+            await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
             
             self.elapsed_seconds = 0
             self.bg_progress = 0.0
@@ -433,9 +474,9 @@ class RIIDCoreService:
                     break
                     
                 # Read hardware timers dynamically
-                hw_timers = self.daq_device.timers_read()
+                hw_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 self.elapsed_seconds = int(hw_timers.get("tmr_c", 0) / 1000)
-                self.live_spectrum = self.daq_device.read_spectrum()
+                self.live_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
                 self.bg_progress = min(float(self.elapsed_seconds / self.bg_target_time), 1.0) if self.bg_target_time > 0 else 1.0
                 self.status_text = f"Recording BG: {self.elapsed_seconds}/{self.bg_target_time}s"
                 
@@ -454,10 +495,10 @@ class RIIDCoreService:
                 self._prev_bg_elapsed_s = bg_live_time_s
                 
             if self.state == 'BG_RECORDING':
-                self.background_spectrum = self.daq_device.read_spectrum()
+                self.background_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
                 
                 # FIXED: Extract final absolute background hardware live-time directly from the MCA registers
-                final_bg_timers = self.daq_device.timers_read()
+                final_bg_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 self.bg_hardware_live_time_ms = float(final_bg_timers.get("tmr_c", self.bg_target_time * 1000))
                 # FIXED: tmr_a (real time, per the timers_a_live_time=False config
                 # set at DPP programming time) was never being read here - every
@@ -499,13 +540,13 @@ class RIIDCoreService:
             self._prev_bg_elapsed_s = 0.0
             
             try:
-                self.daq_device.data_acquisition_stop()
-                self.daq_device.clear_spectrum()
-                self.daq_device.timers_reset()
+                await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+                await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
             except Exception as e:
                 logger.error(f"[BACKGROUND_RUN] Failed to cleanly halt/clear hardware after BG capture: {e}", exc_info=True)
             self.live_spectrum = []
-            try: self.daq_device.close()
+            try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
             except: pass
 
 
@@ -544,14 +585,27 @@ class RIIDCoreService:
         reading, giving true continuity across STOP -> START despite the BRAM wipe.
         The on-board live-time timer (tmr_c) is untouched by $AQ 1 (only $AQ 4 /
         timers_reset() clears it, which an ordinary start never calls), so it already
-        reads the correct cumulative value with no extra math needed."""
+        reads the correct cumulative value with no extra math needed.
+        
+        Every self.daq_device.* call below is offloaded via
+        asyncio.to_thread() - these are synchronous serial I/O calls (each
+        can take up to the port's own ~0.8s timeout), and without offloading
+        them they'd block the entire asyncio event loop for their full
+        duration on every poll tick - including the UI's own 1-second tick
+        timer, which is what was actually causing GUI updates to visibly lag
+        behind their intended 1s cadence during an active survey.
+        _execute_ml_pipeline() below is deliberately NOT offloaded to a
+        thread - TFLite inference on this model is fast enough that it isn't
+        a meaningful contributor, and some ML runtimes have thread-affinity
+        expectations that make blindly offloading them a risk not worth
+        taking for a marginal gain."""
         logger.info("[SURVEY_RUN] Shared master API channel activated for live collection.")
         if self.daq_device is None:
             logger.error("[SURVEY_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
             self.status_text = "Survey Error: Board not programmed"; self.state = 'IDLE'
             return
         try:
-            self.daq_device.open()
+            await asyncio.to_thread(self._call_hw, self.daq_device.open)
             
             # Force the hardware Preset register back to "unlimited" before every
             # survey start (fresh AND resume alike). A prior BG recording or batch
@@ -579,9 +633,9 @@ class RIIDCoreService:
                 # documented above is correct for an actual resume - it just
                 # assumes a known-zero baseline was established at least
                 # once first, which this establishes.
-                self.daq_device.timers_reset()
+                await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
             
-            self.daq_device.data_acquisition_start()
+            await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
             
             if previous_spectrum:
                 logger.info(f"[SURVEY_RUN] Resuming on top of {sum(previous_spectrum)} previously accumulated counts (BRAM cleared by $AQ; live-time timer persists in hardware).")
@@ -597,7 +651,7 @@ class RIIDCoreService:
             # against a reference taken at THIS exact moment, so it can't come out
             # as a stale/spurious spike or a corrupted jump on the count-rate plot.
             try:
-                resync_timers = self.daq_device.timers_read()
+                resync_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 self._prev_survey_elapsed_s = float(resync_timers.get("tmr_c", 0)) / 1000.0
             except Exception as e:
                 logger.warning(f"[SURVEY_RUN] Could not re-sync count-rate timer reference on resume: {e}")
@@ -613,11 +667,11 @@ class RIIDCoreService:
                     logger.warning("[SURVEY_RUN] CLEAR requested mid-survey. Resetting on-board accumulation registers without stopping the survey or resending DPP parameters...")
                     self.clear_requested = False
                     previous_spectrum = []
-                    try: self.daq_device.data_acquisition_stop()
+                    try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
                     except: pass
-                    self.daq_device.clear_spectrum()
-                    self.daq_device.timers_reset()
-                    self.daq_device.data_acquisition_start()
+                    await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
                     self.survey_elapsed_seconds = 0
                     self.survey_hardware_live_time_ms = 0.0
                     self.survey_hardware_real_time_ms = 0.0
@@ -636,7 +690,7 @@ class RIIDCoreService:
                     continue
                 
                 # FIXED: Read hardware live-time straight from the active survey session registers
-                survey_timers = self.daq_device.timers_read()
+                survey_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 self.survey_hardware_live_time_ms = float(survey_timers.get("tmr_c", 0))
                 self.survey_elapsed_seconds = int(self.survey_hardware_live_time_ms / 1000)
                 # FIXED: tmr_a (real time) was never read here - build_riid_download_zip()
@@ -644,7 +698,7 @@ class RIIDCoreService:
                 # measuring it separately, the same bug background had before its fix.
                 self.survey_hardware_real_time_ms = float(survey_timers.get("tmr_a", self.survey_hardware_live_time_ms) or self.survey_hardware_live_time_ms)
                 
-                hardware_spectrum_array = self.daq_device.read_spectrum()
+                hardware_spectrum_array = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
                 if hardware_spectrum_array:
                     if previous_spectrum and len(previous_spectrum) == len(hardware_spectrum_array):
                         self.live_spectrum = [b + h for b, h in zip(previous_spectrum, hardware_spectrum_array)]
@@ -710,12 +764,12 @@ class RIIDCoreService:
                     mode_label = "auto" if self.auto_hysteresis_enabled else "manual"
                     logger.warning(f"[SURVEY_RUN] Peak channel [{peak_channel_value:.0f} cts] hit hysteresis threshold [{effective_threshold} cts] ({mode_label}). Resetting on-board buffer (no DPP resend)...")
                     
-                    try: self.daq_device.data_acquisition_stop()
+                    try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
                     except: pass
                     
-                    self.daq_device.clear_spectrum()
-                    self.daq_device.timers_reset()
-                    self.daq_device.data_acquisition_start()
+                    await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
                     
                     previous_spectrum = []
                     # Bank the elapsed time so far into the offset BEFORE zeroing the
@@ -751,9 +805,9 @@ class RIIDCoreService:
             # silently wiped by the next START's forced BRAM-clear) AND kept
             # incrementing Timer C the whole time acquisition sat "stopped" - which
             # is exactly what inflated the elapsed time relative to true counts.
-            try: self.daq_device.data_acquisition_stop()
+            try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
             except: pass
-            try: self.daq_device.close()
+            try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
             except: pass
             logger.info("[SURVEY_RUN] Shared master loop context released safely.")
 
@@ -980,7 +1034,13 @@ class RIIDCoreService:
         self._main_loop_task = asyncio.create_task(self._batch_recording_worker_loop())
 
     async def _batch_recording_worker_loop(self):
-        """Automated file system serialization thread worker array loop."""
+        """Automated file system serialization thread worker array loop.
+        
+        Every self.daq_device.* call below is offloaded via
+        asyncio.to_thread() - see _continuous_survey_sequence's docstring for
+        the full reasoning (synchronous serial I/O blocking the entire event
+        loop, including the UI's own tick timer, for its full duration on
+        every poll tick)."""
         # Every run in this batch shares the same target duration, so the hardware
         # Preset register only needs to be set once here - not per run. This gives
         # the board's own clock millisecond-precision control over when Timer C
@@ -1004,7 +1064,10 @@ class RIIDCoreService:
                 self.batch_status_text = "Hardware error: Board not programmed"; break
             
             try:
-                self.daq_device.open(); self.daq_device.clear_spectrum(); self.daq_device.timers_reset(); self.daq_device.data_acquisition_start()
+                await asyncio.to_thread(self._call_hw, self.daq_device.open)
+                await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+                await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
+                await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
             except Exception as e:
                 logger.error(f"[BATCH_WORKER] Hardware access dropped during sequence initiation step: {e}", exc_info=True)
                 self.batch_status_text = f"Hardware error: {e}"; break
@@ -1013,8 +1076,9 @@ class RIIDCoreService:
                 while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
                     await asyncio.sleep(1.0)
                     if not self.verify_runtime_hardware_safety(): break
-                    self.batch_elapsed_seconds = int(self.daq_device.timers_read()["tmr_c"] / 1000)
-                    self.batch_spectrum = self.daq_device.read_spectrum()
+                    batch_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
+                    self.batch_elapsed_seconds = int(batch_timers["tmr_c"] / 1000)
+                    self.batch_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
                     self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
                     
                 if self.state != 'BATCH_RECORDING':
@@ -1025,17 +1089,17 @@ class RIIDCoreService:
                 # while we perform the final reads below, so the reported live/real time
                 # drifts well past the requested target the longer those reads take.
                 try:
-                    self.daq_device.data_acquisition_stop()
+                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
                 except Exception as e:
                     logger.error(f"[BATCH_WORKER] Failed to stop acquisition cleanly before final read: {e}", exc_info=True)
                 
-                final_spectrum = self.daq_device.read_spectrum()
+                final_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
                 
                 # Final timer read for the most accurate final live/real time values
                 # (used by both the .json and .spe metadata below). Safe to do now since
                 # acquisition is already stopped and the registers are no longer moving.
                 try:
-                    final_timers = self.daq_device.timers_read()
+                    final_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 except Exception:
                     final_timers = {}
                 
@@ -1075,9 +1139,9 @@ class RIIDCoreService:
                 # everything else in this block including the explicit stop above.
                 # Without this, a cancelled batch run left the hardware physically
                 # running (and the serial connection open) indefinitely.
-                try: self.daq_device.data_acquisition_stop()
+                try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
                 except: pass
-                try: self.daq_device.close()
+                try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
                 except: pass
                 
         self.state = 'IDLE'; self.batch_status_text = "Batch measurements finished successfully."
@@ -1681,10 +1745,10 @@ class RIIDCoreService:
             # the existing programmed handle; it does NOT resend any DPP parameters.
             if self.daq_device is not None and self.is_hardware_available:
                 try:
-                    self.daq_device.open()
-                    self.daq_device.clear_spectrum()
-                    self.daq_device.timers_reset()
-                    self.daq_device.close()
+                    self._call_hw(self.daq_device.open)
+                    self._call_hw(self.daq_device.clear_spectrum)
+                    self._call_hw(self.daq_device.timers_reset)
+                    self._call_hw(self.daq_device.close)
                 except Exception as e:
                     logger.error(f"[SERVICE] Hardware-level CLEAR failed: {e}", exc_info=True)
             
