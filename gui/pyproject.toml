@@ -16,6 +16,11 @@ dependencies = [
 docs = [
     "lazydocs>=0.4.8",
 ]
+viz = [
+    "tensorflow>=2.21.0",
+    "tf-keras>=2.21.0",
+    "visualkeras>=0.2.0",
+]
 
 [tool.uv]
 package = true
