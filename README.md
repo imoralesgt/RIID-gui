@@ -1,6 +1,6 @@
 # RIID-gui
 
-A web-based graphical user interface for radioisotope identification (RIID) built around the NSIL-MCA-DPP4SiPM DAQ system. Developed by the Nuclear Science and Instrumentation Laboratory (NSIL) at the International Atomic Energy Agency (IAEA).  The GUI queries live spectrum acquisition from the gamma detector, background subtraction, on-device ML-based isotope classification, batch spectrum recording with source/shielding metadata, spectra download, and hardware/energy calibration — all from the web browser.
+A web-based graphical user interface for radioisotope identification (RIID) built around the [NSIL-MCA-DPP4SiPM DAQ system](https://github.com/imoralesgt/NSIL-MCA-DPP4SiPM/). Developed by the Nuclear Science and Instrumentation Laboratory (NSIL) at the International Atomic Energy Agency (IAEA).  The GUI queries live spectrum acquisition from the gamma detector, background subtraction, on-device ML-based isotope classification, batch spectrum recording with source/shielding metadata, spectra download, and hardware/energy calibration — all from the web browser.
 
 Source-level documentation (module/class/function reference, generated from docstrings) lives in [`gui/README.md`](gui/README.md) and `gui/docs/reference/`, kept in sync with `main` automatically — see [Generating the docs](#generating-the-docs) below to regenerate it locally.
 
@@ -8,7 +8,7 @@ Source-level documentation (module/class/function reference, generated from docs
 
 - `gui/` — the NiceGUI web application (this is what you run).
 - `daq-core/NSIL-MCA-DPP4SiPM/` — git submodule containing the DAQ board firmware/hardware sources and its `python-api` communications package, which the GUI depends on to talk to the board.
-- `ml-core/` — **DEPRECATED** ML model training/inference assets (TFLite models, preprocessing) used by the GUI's RIID pipeline.
+- `deprecated-ml-core/` — **DEPRECATED**, not a `uv` workspace member. Historical record of the RIID model R&D: preprocessing/inference prototypes, the Keras→TFLite conversion notebook, an early Arduino Uno Q deployment target, and real-hardware validation spectra. See [Machine learning model (RIID)](#machine-learning-model-riid) below.
 - `utils/spectrum_recorder/` — standalone spectrum recording utility/library.
 
 ## Cloning the repository
@@ -28,7 +28,7 @@ git submodule update --init --recursive
 
 ## Running the GUI
 
-This project uses [uv](https://docs.astral.sh/uv/) to manage the Python workspace (`gui`, `ml-core`, `utils/spectrum_recorder`, and the DAQ `python-api` submodule are all workspace members sharing one lockfile). Requires Python 3.12+.
+This project uses [uv](https://docs.astral.sh/uv/) to manage the Python workspace (`gui`, `utils/spectrum_recorder`, and the DAQ `python-api` submodule are workspace members sharing one lockfile; `deprecated-ml-core/` is standalone and not part of it). Requires Python 3.12+.
 
 Install dependencies from the repository root:
 
@@ -51,17 +51,17 @@ The interface is organized into four tabs. Only one acquisition-related tab is a
 
 ### Spectrum ID
 
-The primary live-survey workspace:
+The primary live survey workspace:
 
 - **Live spectrum plot** — real-time counts-vs-energy chart with two visualization modes: overlaid live-survey + background spectra, or a single background-subtracted spectrum. Toggle between linear and logarithmic count scales.
 - **Count-rate plot** — instantaneous counts-per-second over time, tracking whichever activity (survey or background capture) is currently running, independently clearable.
 - **RIID classification** — runs a selectable on-device ML model (`cnn_multilabel` or `cnn_deep`) against the live spectrum, showing detected isotopes, average confidence, live time, and a per-class probability breakdown. Detection confidence threshold and the minimum-counts trigger for attempting classification are both adjustable live.
-- **Background spectrum workflow** — record a fresh background, load a previously saved one, or save the currently recorded background to disk (JSON and/or SPE format). A background must exist before a survey can be started.
+- **Background spectrum workflow** — record a fresh background, load a previously saved one, or save the currently recorded background to disk (JSON and/or SPE format). **Important:** A background must exist before a survey can be started.
 - **Survey controls** — start/stop a continuous survey, restart (clear the accumulated survey without touching the background), and download the current survey + background bundle as a `.zip` (JSON and SPE).
 
 ![Spectrum ID tab: overlaid live survey and background, with Cs-137 detected at 100% confidence](docs/res/spectrum_id.png)
 
-The "Spectrum - Background" visualization mode shows the same survey with the background subtracted out — this is the view that reflects what the ML pipeline itself actually reasons over (its limit-of-detection gate and inference both run against the background-subtracted spectrum, not the raw overlay):
+The "Spectrum - Background" visualization mode shows the same survey with the background subtracted out — this is the view that reflects what the ML pipeline actually computes over (its limit-of-detection gate and inference both run against the background-subtracted spectrum, not the raw overlay):
 
 ![Spectrum ID tab: background-subtracted view isolating the Cs-137 photopeak](docs/res/spectrum_id_subtracted.png)
 
@@ -92,25 +92,69 @@ Bulk file management for everything the station has written to disk, organized i
 
 ## Machine learning model (RIID)
 
-Isotope classification runs fully on-device via [LiteRT](https://ai.google.dev/edge/litert) (TFLite), with no network calls. Compiled models live in `gui/ml_models/` and are loaded by `gui/ml_inference.py` — these are the models actually served by the GUI at runtime, independent from `ml-core/`, which is deprecated.
+Isotope classification runs fully on-device via [LiteRT](https://ai.google.dev/edge/litert) (TFLite), with no network calls. Compiled models live in `gui/ml_models/` and are loaded by `gui/ml_inference.py` — these are the models actually served by the GUI at runtime, independent from the deprecated R&D assets in `deprecated-ml-core/` (more on that [below](#model-rd-history-deprecated-ml-core)).
 
-Two selectable models (switchable from the Spectrum ID tab, only while idle):
+### Production models
 
-| Model | Classes | Notes |
-|---|---|---|
-| `cnn_multilabel` (default) | Background, Co-60, Cs-137, Eu-152, U-nat | Per-class probabilities are independent (multi-label) — multiple isotopes can be flagged simultaneously. |
-| `cnn_deep` | Background, Co-60, Cs-137, Eu-152, U-nat, and the mixture classes Co-60+Eu-152, Cs-137+Co-60, Cs-137+Co-60+Eu-152, Cs-137+Eu-152 | Trained over specific isotope-mixture combinations rather than independent per-isotope probabilities. |
+Two selectable models (switchable from the Spectrum ID tab, only while idle), both 1-D CNNs that take the same 250-value preprocessed feature vector (see [Feature pipeline](#feature-pipeline) below) — verified directly from the shipped `.tflite` files' input/output tensors:
 
-Each model has its own class list, rendered as the probability bars in the Spectrum ID tab's "Class Probabilities" panel.
+| Model | Input shape | Output shape | Classes |
+|---|---|---|---|
+| `cnn_multilabel` (default) | `(1, 250, 1)` float32 | `(1, 5)` float32 | Background, Co-60, Cs-137, Eu-152, U-nat |
+| `cnn_deep` | `(1, 250, 1)` float32 | `(1, 9)` float32 | Background, Co-60, Cs-137, Eu-152, U-nat, and the mixture classes Co-60+Eu-152, Cs-137+Co-60, Cs-137+Co-60+Eu-152, Cs-137+Eu-152 |
 
-Inference pipeline (`ml_inference.py::inference_pipeline`, preprocessing in `ml_preprocessing.py`), run against the live spectrum on every tick:
+The two models differ in what their output layer actually represents, not just class count:
 
-1. **Background subtraction** — the background is normalized to the survey's live time and subtracted from the live spectrum; negative results are clipped to zero.
+- **`cnn_multilabel`** treats each isotope as an independent binary detector — its 5 outputs don't need to sum to 1, and any subset can cross the detection threshold simultaneously (e.g. Cs-137 *and* Co-60 both "on" at once for a genuine mixture the model was never explicitly trained on as a combined class).
+- **`cnn_deep`** treats the 9 outputs as mutually-exclusive classes, including four pre-defined *mixture* classes trained as their own distinct targets (e.g. "Cs-137_Co-60" is one single class, not the OR of "Cs-137" and "Co-60"). It only recognizes the specific combinations it was trained on, not arbitrary isotope pairs.
+
+Each model has its own class list and label ordering, both read from `MlInference.MODEL_LABELS` and rendered as the probability bars in the Spectrum ID tab's "Class Probabilities" panel.
+
+Both are 1-D CNNs with an identical trunk — two `[Conv1D → MaxPooling1D]` blocks (16 then 32 filters) feeding a `Flatten → Dense(32, ReLU)` layer — that only diverges at the very last layer. The CNN heads are distributed as follows: `cnn_multilabel` ends in a `LOGISTIC` (sigmoid) op, whereas `cnn_deep` in a `SOFTMAX` op — the independent-vs-mutually-exclusive distinction described above, made visible:
+
+<table>
+<tr>
+<th><code>cnn_multilabel</code> — 5-way independent sigmoid head</th>
+<th><code>cnn_deep</code> — 9-way mutually-exclusive softmax head</th>
+</tr>
+<tr>
+<td><img src="docs/res/cnn_multilabel_architecture.png" alt="cnn_multilabel architecture: two Conv1D+MaxPooling1D blocks, Flatten, Dense(32), ending in a green 5-way sigmoid head" width="420"></td>
+<td><img src="docs/res/cnn_deep_architecture.png" alt="cnn_deep architecture: the same two Conv1D+MaxPooling1D blocks, Flatten, Dense(32), ending in a purple 9-way softmax head" width="420"></td>
+</tr>
+</table>
+
+Both diagrams were rendered with [`visualkeras`](https://github.com/paulgavrikov/visualkeras) from the layer shapes. To regenerate them after a model change:
+
+```bash
+cd gui
+uv sync --group viz
+uv run --group viz python docs/scripts/render_architecture_diagrams.py
+```
+
+This overwrites `docs/res/cnn_multilabel_architecture.png` and `docs/res/cnn_deep_architecture.png` in place. The `viz` group (`tensorflow`, `tf-keras`, `visualkeras`) is only pulled in when explicitly requested — it's not part of the default `uv sync`.
+
+### Feature pipeline
+
+Inference (`ml_inference.py::inference_pipeline`, preprocessing in `ml_preprocessing.py`) runs against the live spectrum on every tick:
+
+1. **Background subtraction** (`MLPreprocessing.subtract_background`) — the background is normalized to the survey's live time and subtracted from the live spectrum; negative results are clipped to zero.
 2. **Limit-of-detection gate** — if the tallest channel of the background-subtracted spectrum doesn't exceed the "ML pipeline single-channel trigger" (default 20 counts, adjustable 1-200 in the Spectrum ID sidebar), inference is skipped entirely and the UI reports "Not enough counts for RIID" rather than a low-confidence guess.
-3. **Feature preprocessing** — crop the first 50 low-energy channels (LLD region, not diagnostic), apply `log10(counts + 1)` scaling, smooth with a Savitzky-Golay filter (window length 11, polynomial order 3), decimate by a factor of 8, then normalize to unit area — reproducing the exact vector shape/scale the model was trained on.
-4. **TFLite inference** — the preprocessed vector is fed to the interpreter, returning a probability (0.0-1.0) per class.
+3. **Feature preprocessing** (`MLPreprocessing.preprocess_log10`) — crops the first 50 low-energy channels (LLD region), applies `log10(counts + 1)` scaling, smooth with a Savitzky-Golay filter (window length 11, polynomial order 3), decimates by a factor of 8 (every 8th sample), then normalizes to unit area (values sum to 1).
+4. **TFLite inference** — the preprocessed vector is fed to the ML inference model, returning a probability (0.0-1.0) per class.
 
-A class only counts as "detected" (surfaced in the Detected Isotopes metric card, and colored red in its probability bar) once its probability exceeds the operator-adjustable Confidence Threshold (default 50%, range 50%-99.9%), which can be changed live even mid-survey — the underlying inference always returns the full, unfiltered per-class breakdown regardless of this threshold.
+The DPP4SiPM hardware outputs a 2048-channel spectra. Steps 1 and 3 are shape-preserving except for the crop and decimation, so: `(2048 - 50) / 8 = 250` — the `(1, 250, 1)` input both models expect. The 2048-channel raw spectrum, the 50-bin crop, and the decimate-by-8 factor all have to agree for the vector the model receives live to match what it saw during training, which is why `MLPreprocessing`'s defaults (`crop_bins_lld=50`, `decimation=8`, `sg_window_length=11`, `sg_polyorder=3`) shouldn't be changed independently of a corresponding model retrain.
+
+A class only counts as "detected" (surfaced in the Detected Isotopes metric card, and colored red in its probability bar) once its probability exceeds the user-adjustable *Confidence Threshold* (default 50%, range 50%-99.9%), which can be changed live even mid-survey — the underlying inference always returns the full, unfiltered per-class breakdown regardless of this threshold.
+
+### Model R&D history (`deprecated-ml-core/`)
+
+`deprecated-ml-core/` is a standalone (non-workspace) project retaining artifacts from the models' development:
+
+- **`keras-to-tflite.ipynb`** — converts a trained Keras model to TFLite (`TFLiteConverter` with default optimizations). Its retained output shows `cnn_deep`'s architecture as a 1-D CNN: three `[Conv1D → MaxPool1D → Dropout]` blocks (16 filters each) feeding a `Flatten → Dense(32) → Dropout → Dense(N classes)` head. That captured run is from an earlier 6-class snapshot (`bkg`/`co`/`coeu`/`cs`/`csco`/`eu`, 18,310 params, 28.6KB `.tflite`) — the final 9-class models actually shipped in `gui/ml_models/` are larger (~74KB each) and weren't re-exported through this notebook, so treat it as documenting the architecture *family*, not the exact final layer sizes.
+- **`preprocessing.py`** — the same feature-pipeline logic now in `gui/ml_preprocessing.py`, plus three exploratory variants not used in production: `preprocess_no_log` (no log scaling), `preprocess_baseline` (fixed-length raw normalization), and `preprocess_roi` (statistical features - max/sum/argmax/std/percentiles - extracted from predefined energy windows around each isotope's known photopeaks). `models/tflite/` correspondingly retains `roi.tflite`, `mlp_log.tflite`, `mlp_no_log.tflite`, `mlp_raw.tflite`, and `cnn_log.tflite` — alternative architectures/feature sets evaluated during model selection before settling on the CNN + log10-preprocessing combination that became `cnn_deep`/`cnn_multilabel`. Note its default crop is 20 bins, vs. 50 in the deployed `gui/ml_preprocessing.py` - a parameter that shifted between this R&D snapshot and the final production pipeline.
+- **`io_utils.py`** — spectrum file I/O for both `.spe` and `.json`, plus `resample_to_energy_grid`: since training spectra were collected across multiple detector units with different energy calibrations, it linearly interpolates every spectrum onto a shared 0-2047 keV, 1 keV/bin grid (area-conserving) before use, so the model sees a consistent energy axis regardless of which physical detector or calibration produced the data.
+- **`data/NML/`** — real single-isotope and mixture spectra recorded from actual DPP4SiPM hardware (Cs-137, Co-60, Ba-133, and combinations like Co-60+Cs-137 and Ba-133+Cs-137, at 5s and 30s live times) — used to validate the trained models against genuine detector output rather than only simulated/held-out training data.
+- **`inference.py` / `mcu.cpp` / README** — an early standalone deployment target (an Arduino Uno Q board over serial) for running inference outside the GUI entirely; superseded by the GUI's own `ml_inference.py` pipeline, kept here for reference.
 
 ## Generating the docs
 
