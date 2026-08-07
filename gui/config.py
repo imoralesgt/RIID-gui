@@ -1,3 +1,11 @@
+"""App-wide constants, filesystem layout, logging setup, and brand palette.
+
+Imported by every other module in this package for shared configuration:
+data directory paths, the ``logger`` instance, ``BRAND_COLORS``, and
+``HARDWARE_DEFAULTS``. Executes its logging/exception-hook setup once, at
+first import.
+"""
+
 import os
 import logging
 import sys
@@ -5,18 +13,16 @@ import threading
 
 # 1. Base File System Directory and Root Log Path Mapping
 #
-# Restructured per issue #57: the flat data/ folder now separates persistent
-# configuration (conf/) from generated spectrum output (spectra/), and the
-# latter is further split by acquisition mode so future work (issues #44/#45 -
-# exporting background and RIID-tab spectra) has somewhere to write without
-# further reshuffling this structure again.
+# The flat data/ folder separates persistent configuration (conf/) from
+# generated spectrum output (spectra/), which is further split by
+# acquisition mode:
 #
 #   data/
 #    |-- conf/                  (detectors.json, sources.json - tracked in git)
 #    |-- spectra/
-#         |-- background/       (background captures - not yet written; #45)
-#         |-- batch/            (batch recording .spe/.json output - #42/#54)
-#         |-- riid/             (RIID-tab spectrum export - not yet written; #44)
+#         |-- background/       (background captures)
+#         |-- batch/            (batch recording .spe/.json output)
+#         |-- riid/             (RIID-tab spectrum export)
 DATA_DIR = "data"
 CONF_DIR = os.path.join(DATA_DIR, "conf")
 SPECTRA_DIR = os.path.join(DATA_DIR, "spectra")
@@ -59,7 +65,7 @@ logger = logging.getLogger("spectrum_recorder")
 logger.info(f"Master root file logger successfully established. File location: {os.path.abspath(LOG_FILE_PATH)}")
 
 # =========================================================================
-# FIXED: DEEP NOISE FILTERING MATRIX
+# DEEP NOISE FILTERING MATRIX
 # =========================================================================
 # Forcefully mute the third-party file watcher library flooding the outputs
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
@@ -75,12 +81,14 @@ logging.getLogger("DAQ_MCA_API").setLevel(logging.INFO)
 
 # 3. UNHANDLED ASYNCHRONOUS EXCEPTION TRACKING INTERCEPTORS
 def global_unhandled_exception_hook(exctype, value, traceback):
+    """Logs any otherwise-unhandled main-thread exception before the process exits."""
     if issubclass(exctype, KeyboardInterrupt):
         sys.__excepthook__(exctype, value, traceback)
         return
     logger.critical("!!! CRITICAL UNHANDLED MAIN THREAD EXCEPTION ENCOUNTERED !!!", exc_info=(exctype, value, traceback))
 
 def global_thread_exception_hook(args):
+    """Logs any otherwise-unhandled exception raised in a background worker thread."""
     logger.critical(
         f"!!! CRITICAL UNHANDLED BACKGROUND WORKER EXCEPTION IN THREAD [{args.thread.name}] !!!", 
         exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
@@ -120,8 +128,8 @@ def get_rgba_fill(color_key: str, alpha: float = 0.15) -> str:
 DETECTORS_DB_FILENAME = "detectors.json"
 SOURCES_DB_FILENAME = "sources.json"
 
-# Moved from data/ directly into data/conf/ (issue #57) - these two files must
-# be preserved/tracked in the repository, unlike the generated spectra output.
+# Live under data/conf/ - these two files must be preserved/tracked in the
+# repository, unlike the generated spectra output.
 DETECTORS_DB_PATH = os.path.join(CONF_DIR, DETECTORS_DB_FILENAME)
 SOURCES_DB_PATH = os.path.join(CONF_DIR, SOURCES_DB_FILENAME)
 

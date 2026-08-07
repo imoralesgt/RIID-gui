@@ -1,8 +1,18 @@
+"""Spectrum preprocessing utilities feeding the RIID ML pipeline.
+
+:class:`MLPreprocessing` implements the feature pipeline the classifier was
+trained on: background subtraction, log10 scaling, Savitzky-Golay
+smoothing, decimation, and area normalization. Used directly by
+``ml_inference.MlInference`` and by ``RIIDCoreService`` for the "Spectrum -
+Background" visualization.
+"""
+
 import numpy as np
 from scipy.signal import savgol_filter
 from config import logger
 
 class MLPreprocessing:
+    """Background subtraction and log10/smoothing/decimation feature pipeline."""
 
     def __init__(self, min_counts : int = 25,
                 crop_bins_lld : int = 50,
@@ -24,12 +34,15 @@ class MLPreprocessing:
         self.__sg_polyorder = int(sg_polyorder) if sg_polyorder > 0 else 3
 
     def get_min_counts(self):
+        """Returns the configured minimum-counts threshold."""
         return self.__min_counts
-    
+
     def get_crop_bints_lld(self):
+        """Returns the number of low-energy (LLD) bins cropped before inference."""
         return self.__crop_bins_lld
-    
+
     def get_decimation(self):
+        """Returns the configured decimation factor."""
         return self.__decimation
 
     def subtract_background(self, 
@@ -76,11 +89,13 @@ class MLPreprocessing:
     
     def preprocess_log10(self, spectrum_data : np.ndarray) -> np.ndarray:
         """Applies log10 scaling, smoothing, decimation, and normalization to a given spectrum.
+
         Uses the class attributes defined in the constructor for configuration:
-            - crop_bins_lld: how many low-energy bins to crop
-            - decimation: decimation factor
-            - sg_window_length: window length for Savitzky-Golay filter
-            - sg_polyorder: polynomial order for Savitzky-Golay filter
+
+        - crop_bins_lld: how many low-energy bins to crop
+        - decimation: decimation factor
+        - sg_window_length: window length for Savitzky-Golay filter
+        - sg_polyorder: polynomial order for Savitzky-Golay filter
 
         Args:
             spectrum_data (np.ndarray): Raw spectrum counts.
@@ -124,12 +139,12 @@ class MLPreprocessing:
             np.ndarray: Normalized, decimated, filtered, and log10-scaled spectrum
         """
 
-        spectrum_no_bk = self._subtract_background(spectrum_data = spectrum_data,
+        spectrum_no_bk = self.subtract_background(spectrum_data = spectrum_data,
                                                 spectrum_live_time = spectrum_live_time,
                                                 bkgnd_data = bkgnd_data,
                                                 bkgnd_live_time = bkgnd_live_time)        
         
-        spectrum_log10 = self._preprocess_log10(spectrum_data = spectrum_no_bk)
+        spectrum_log10 = self.preprocess_log10(spectrum_data = spectrum_no_bk)
 
         return spectrum_log10
 

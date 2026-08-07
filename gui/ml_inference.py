@@ -1,7 +1,16 @@
+"""On-device RIID classification: model loading, inference, and thresholds.
+
+:class:`MlInference` loads a compiled TFLite model from ``ml_models/``,
+holds the current background spectrum and trigger/classification
+thresholds, and runs the full background-subtraction -> preprocessing ->
+inference pipeline against a live spectrum. Preprocessing itself lives in
+``ml_preprocessing.py``.
+"""
+
 import ai_edge_litert.interpreter as tflite
 import numpy as np
 import os
-from ml_preprocessing import MLPreprocessing 
+from ml_preprocessing import MLPreprocessing
 from config import logger
 
 class MlInference:

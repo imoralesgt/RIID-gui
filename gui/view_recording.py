@@ -1,3 +1,11 @@
+"""The Spectrum Recording tab: batch acquisition with source/shielding metadata.
+
+:class:`SpectrumRecordingPanel` renders the radiation sources directory,
+shielding/absorber layer list, and the batch-recording controls/live plot
+for the "Spectrum Recording" tab, all backed by the shared
+``RIIDCoreService`` and its ``SpectrumAcquisitionSystem``.
+"""
+
 import os
 import json
 import asyncio
@@ -7,6 +15,8 @@ from state_engine import SpectrumAcquisitionSystem
 from config import BRAND_COLORS, get_rgba_fill, logger
 
 class SpectrumRecordingPanel:
+    """Batch-recording tab: sources/shielding directories plus batch controls."""
+
     # Fixed on purpose: kept constant across data updates so Plotly preserves the
     # user's manual zoom/pan instead of resetting it every time the batch spectrum
     # refreshes. Autozoom then only happens via the user's own action (double-click
@@ -22,19 +32,23 @@ class SpectrumRecordingPanel:
     DEFAULT_SHIELDING_THICKNESS_MM = 1.0
 
     def __init__(self, service):
+        """Builds the panel's widgets.
+
+        Args:
+            service (RIIDCoreService): The shared backend service instance.
+        """
         self.service = service
         self.system = service.system
         # Tracks the last batch spectrum fingerprint actually rendered, so the
         # heavy record_plot_container.clear()+ui.plotly() redraw can be skipped
-        # while no batch recording is active and nothing changed (issue #43).
+        # while no batch recording is active and nothing changed.
         self._last_batch_render_signature = None
         # The live ui.plotly widget, kept alive and updated in place across data
         # refreshes (rather than torn down and recreated) so the browser-side plot
         # instance - and the user's zoom/pan state - persists.
         self._plot_widget = None
-        # Issue #77: independent of the RIID tab's own log-scale preference -
-        # a separate control for a separate plot. Disabled by default per the
-        # issue's explicit requirement.
+        # Independent of the RIID tab's own log-scale preference - a
+        # separate control for a separate plot. Disabled by default.
         self.use_log_scale = False
         self.render_layout()
 
@@ -67,6 +81,7 @@ class SpectrumRecordingPanel:
                 ''')
 
                 def delete_source_handler(msg):
+                    """Removes the clicked row from the active run's source list."""
                     row_to_del = msg.args
                     logger.warning(f"[USER_ACTION] Operator deleted radioactive isotope source reference row match: {row_to_del['Source ID']}")
                     self.system.runtime_metadata['Sources'] = [s for s in self.system.runtime_metadata['Sources'] if s['Source ID'] != row_to_del['Source ID']]
@@ -105,6 +120,7 @@ class SpectrumRecordingPanel:
                 ''')
 
                 def delete_attenuator_handler(msg):
+                    """Removes the clicked row from the active run's shielding list."""
                     row_to_del = msg.args
                     logger.warning(f"[USER_ACTION] Operator deleted shielding/absorber layer row match: {row_to_del['Material Symbol']}")
                     self.system.runtime_metadata['Attenuators'] = [
@@ -121,7 +137,7 @@ class SpectrumRecordingPanel:
                 ui.label('Batch Recording Output & Controls').classes('text-xs font-bold uppercase tracking-wider text-zinc-700')
                 self.record_plot_container = ui.column().classes('w-full items-center justify-center rounded-lg border p-1 bg-white')
                 
-                # Issue #77: log-scale toggle (independent of the RIID tab's own),
+                # Log-scale toggle (independent of the RIID tab's own),
                 # plus real-time count-rate/total-counts stats that reset with
                 # every new run (batch_elapsed_seconds and batch_spectrum are
                 # already reset by the hardware sequence at the start of each
@@ -152,6 +168,7 @@ class SpectrumRecordingPanel:
                 ui.timer(1.0, self.sync_ui_state)
 
     def trigger_batch_start(self):
+        """Starts the configured multi-run batch recording."""
         logger.warning(f"[USER_ACTION] Operator triggered automated spectrum multi-run batch recording. prefix='{self.prefix_input.value}' | runs={self.runs_input.value}")
         self.service.start_batch_recording(
             target_time=int(self.time_input.value or self.service.DEFAULT_BATCH_TARGET_TIME_S),
@@ -160,10 +177,12 @@ class SpectrumRecordingPanel:
         )
 
     def trigger_batch_stop(self):
+        """Stops the currently running batch recording."""
         logger.warning("[USER_ACTION] Operator requested STOP multi-run batch recording.")
         self.service.stop_execution()
 
     def trigger_batch_log_scale_change(self, e):
+        """Toggles the batch plot's log/linear scale and forces a redraw."""
         logger.info(f"[USER_ACTION] Operator modified batch plot scaling preference -> use_log_scale={e.value}")
         self.use_log_scale = e.value
         self._last_batch_render_signature = None  # force an immediate redraw
@@ -218,7 +237,7 @@ class SpectrumRecordingPanel:
         self.refresh_recording_canvas(spectrum)
 
     def _batch_y_axis_layout(self) -> dict:
-        """Issue #79: matches the RIID tab's spectrum plot axis styling exactly
+        """Matches the RIID tab's spectrum plot axis styling exactly
         (same title/tick font sizes, same log-mode decade-tick formatting),
         rather than the batch plot's own smaller, differently-configured axes."""
         if self.use_log_scale:
@@ -244,6 +263,11 @@ class SpectrumRecordingPanel:
             }
 
     def refresh_recording_canvas(self, spectrum_data: list):
+        """Redraws the batch spectrum plot, or an idle placeholder if empty.
+
+        Args:
+            spectrum_data (list): Current batch run's spectrum counts.
+        """
         if not spectrum_data:
             self.record_plot_container.clear()
             self._plot_widget = None
@@ -259,7 +283,7 @@ class SpectrumRecordingPanel:
         a2 = float(prof.get('calib_a2', 0.0))
         energy_axis = [a0 + (a1 * ch) + (a2 * (ch ** 2)) for ch in range(num_channels)]
         
-        # Issue #77: log-scale values are floored at 1 for display only (never
+        # Log-scale values are floored at 1 for display only (never
         # the underlying data) - log(0) is undefined, and without this, zero-
         # count channels crush into a visually broken sliver below the axis's
         # own floor, same issue already fixed on the RIID tab's spectrum plot.
@@ -267,10 +291,9 @@ class SpectrumRecordingPanel:
         
         trace = {'x': energy_axis, 'y': display_y, 'type': 'scatter', 'mode': 'lines', 'line': {'color': BRAND_COLORS['primary'], 'width': 1.2}}
         if not self.use_log_scale:
-            # Shading is deliberately omitted in log mode (issue #77's explicit
-            # requirement) - filling to y=0 on a log axis is misleading, since
-            # the visual "zero" floor is actually the flooring clip above, not
-            # a true zero.
+            # Shading is deliberately omitted in log mode - filling to y=0 on
+            # a log axis is misleading, since the visual "zero" floor is
+            # actually the flooring clip above, not a true zero.
             trace['fill'] = 'tozeroy'
             trace['fillcolor'] = get_rgba_fill('primary')
         
@@ -293,10 +316,11 @@ class SpectrumRecordingPanel:
             self._plot_widget.figure = fig
             self._plot_widget.update()
     def _build_append_modal(self):
+        """Builds the "link/register radiation source" dialog and its Add button."""
         with ui.dialog() as source_dialog, ui.card().classes('p-4 w-96 space-y-3'):
             ui.label('Link / Register Radiation Source').classes('text-sm font-bold text-blue-600')
 
-            # Clear two-mode split (issue #53, requirement 3): rather than showing
+            # Clear two-mode split: rather than showing
             # an "existing source" dropdown and a "new source" form at the same time
             # (confusing - not obvious which one actually applies), the operator
             # explicitly picks a mode and only the relevant control is shown.
@@ -335,10 +359,10 @@ class SpectrumRecordingPanel:
             ui.markdown("--- *Source Properties* ---").classes('text-[10px] text-center text-zinc-400 block w-full q-my-none')
 
             # Shared field set for both modes. In "Use Existing" mode these get
-            # auto-filled from sources.json the moment a code is picked (requirement
-            # 1), stay freely editable, and any edits are committed back to the
-            # database on Save/Append (requirement 2 - previously silently discarded
-            # for existing sources, only new ones were ever written back).
+            # auto-filled from sources.json the moment a code is picked, stay
+            # freely editable, and any edits are committed back to the
+            # database on Save/Append - for both existing and newly
+            # registered sources.
             new_iso = ui.input('Isotope Symbol', value='Cs-137').props('dense outlined').classes('w-full text-xs')
             new_act = ui.number('Reference Activity (kBq)', value=100.0, format='%.2f').props('dense outlined').classes('w-full text-xs')
             new_date = ui.input('Reference Date (YYYY/MM/DD)', value=datetime.now().strftime('%Y/%m/%d')).props('dense outlined').classes('w-full text-xs')
@@ -356,6 +380,7 @@ class SpectrumRecordingPanel:
                 .props('dense outlined rows=2').classes('w-full text-xs')
 
             def apply_mode_visibility():
+                """Shows only the active mode's controls, resetting to defaults on New."""
                 is_existing = mode_toggle.value == 'existing'
                 existing_mode_group.set_visibility(is_existing)
                 new_mode_group.set_visibility(not is_existing)
@@ -371,8 +396,7 @@ class SpectrumRecordingPanel:
                     new_form.set_value('point')
 
             def populate_fields_from_existing(code):
-                """Requirement 1: selecting an existing source must immediately
-                reflect its stored values in the fields above."""
+                """Fills the field set above with the picked source's stored values."""
                 metrics = self.system.sources_db.get(code) if code else None
                 if not metrics:
                     return
@@ -387,16 +411,17 @@ class SpectrumRecordingPanel:
             apply_mode_visibility()
 
             def resolve_target_code():
+                """Returns the Source ID to act on, from whichever mode is active."""
                 if mode_toggle.value == 'new':
                     code = str(new_code_input.value or '').strip()
                     return code or None
                 return code_select.value
 
             def save_to_database() -> bool:
-                """Requirements 2 & 3: a standalone, explicit commit to sources.json -
-                works identically whether registering a brand new source or editing
-                an existing one's fields, so the operator doesn't need to also
-                append into the current run just to persist a correction."""
+                """A standalone, explicit commit to sources.json - works identically
+                whether registering a brand new source or editing an existing
+                one's fields, so the operator doesn't need to also append into
+                the current run just to persist a correction."""
                 target_code = resolve_target_code()
                 if not target_code:
                     ui.notify("Enter or select a Source ID first.", type="negative")
@@ -418,6 +443,7 @@ class SpectrumRecordingPanel:
                 return False
 
             def commit_source_selection():
+                """Saves the source to the database and appends it to the active run."""
                 # Backstop guard: the trigger button below is disabled while a batch
                 # is running (see sync_ui_state), but if this dialog was already open
                 # before the batch started, that alone wouldn't stop it - the Sources
@@ -458,6 +484,7 @@ class SpectrumRecordingPanel:
                 ui.button('Append into Run', icon='add_circle', on_click=commit_source_selection).props('dense color=primary').classes('flex-1')
 
         def open_source_dialog():
+            """Opens the add-source dialog after re-filtering already-appended codes."""
             # Defensive re-filter on every open: covers the case where a source was
             # deleted from the active list (or appended from an earlier dialog
             # session) since this dialog was last shown.
@@ -485,6 +512,7 @@ class SpectrumRecordingPanel:
                 .props('dense outlined rows=2').classes('w-full text-xs')
 
             def commit_shielding_entry():
+                """Validates and appends a new shielding layer to the active run."""
                 # Backstop guard, mirroring the sources dialog: the trigger button is
                 # disabled during a batch (see sync_ui_state), but a dialog already
                 # open before the batch started wouldn't be caught by that alone.

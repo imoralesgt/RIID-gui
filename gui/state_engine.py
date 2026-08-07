@@ -1,3 +1,12 @@
+"""Persistence layer for hardware/source JSON databases and device discovery.
+
+:class:`SpectrumAcquisitionSystem` owns the on-disk hardware calibration
+profile database (``detectors.json``) and radiation source library
+(``sources.json``), the active hardware profile derived from them, and the
+low-level DAQ device probe used to identify a connected board by serial
+number. Instantiated once by ``RIIDCoreService``.
+"""
+
 import os
 import sys
 import json
@@ -5,7 +14,17 @@ from config import HARDWARE_DEFAULTS, DETECTORS_DB_PATH, SOURCES_DB_PATH, logger
 from core.daq_commands import DaqCommands
 
 class SpectrumAcquisitionSystem:
+    """Owns the hardware/source JSON databases and the active hardware profile."""
+
     def __init__(self, json_path: str = DETECTORS_DB_PATH, sources_path: str = SOURCES_DB_PATH):
+        """Loads the hardware and source databases from disk.
+
+        Args:
+            json_path (str): Path to the hardware calibration profile
+                database (keyed by board serial number).
+            sources_path (str): Path to the radiation source library
+                database.
+        """
         self.json_path = json_path
         self.sources_path = sources_path
         self.serial_number = "UNKNOWN"
@@ -25,6 +44,7 @@ class SpectrumAcquisitionSystem:
         }
         
     def _load_json(self, path: str) -> dict:
+        """Loads a JSON database file, returning {} if missing or unreadable."""
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -34,6 +54,11 @@ class SpectrumAcquisitionSystem:
         return {}
 
     def save_hardware_db(self) -> bool:
+        """Writes the in-memory hardware profile database to disk.
+
+        Returns:
+            bool: True on success, False if the write failed.
+        """
         try:
             # Dynamically resolve target directory path using constant configuration
             os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
@@ -45,6 +70,11 @@ class SpectrumAcquisitionSystem:
             return False
 
     def save_sources_db(self) -> bool:
+        """Writes the in-memory radiation source library database to disk.
+
+        Returns:
+            bool: True on success, False if the write failed.
+        """
         try:
             # Dynamically resolve target directory path using constant configuration
             os.makedirs(os.path.dirname(self.sources_path), exist_ok=True)
@@ -56,6 +86,17 @@ class SpectrumAcquisitionSystem:
             return False
 
     def probe_device(self) -> str:
+        """Opens a connection to whatever DAQ board is present and identifies it.
+
+        Registers a fresh default hardware profile for a never-before-seen
+        serial number, then syncs `hw_profile` to match.
+
+        Returns:
+            str: The discovered board's serial number.
+
+        Raises:
+            Exception: If no board could be opened/identified.
+        """
         daq = DaqCommands()
         try:
             daq.open()
@@ -73,6 +114,8 @@ class SpectrumAcquisitionSystem:
         return self.serial_number
 
     def sync_hardware_profile(self) -> None:
+        """Rebuilds `hw_profile` from the current serial number's saved values,
+        falling back to `HARDWARE_DEFAULTS` for any key not yet persisted."""
         json_tier = self.db.get(self.serial_number, {})
         compiled = {}
         for key, def_val in HARDWARE_DEFAULTS.items():
