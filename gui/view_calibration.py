@@ -1,9 +1,29 @@
+"""The Hardware & Calibration tab: instrument identity, calibration, DPP settings.
+
+:class:`HardwareCalibrationPanel` renders editable fields for the instrument
+identity, energy calibration coefficients, and advanced MCA/DPP parameters,
+and commits them to the hardware profile database (and optionally the board
+itself) on demand.
+"""
+
 import json
 from nicegui import ui
 from config import BRAND_COLORS, HARDWARE_DEFAULTS, logger
 
 class HardwareCalibrationPanel:
+    """Editable instrument identity/calibration/DPP settings, keyed by board S/N."""
+
     def __init__(self, system, title_sync_callback=None, push_profile_callback=None):
+        """Builds the panel's widgets.
+
+        Args:
+            system (SpectrumAcquisitionSystem): Owns the hardware profile
+                database this panel reads/writes.
+            title_sync_callback (callable, optional): Called after a commit
+                so the browser tab title can pick up any changed identity.
+            push_profile_callback (callable, optional): Called after a
+                commit to transmit the DPP parameters to the physical board.
+        """
         self.system = system
         self.title_sync_callback = title_sync_callback
         # Called on COMMIT to actually transmit the DPP parameters to the board -
@@ -13,6 +33,7 @@ class HardwareCalibrationPanel:
         self.render_layout()
 
     def render_layout(self):
+        """Builds the identity/calibration/advanced-settings fields and Commit button."""
         with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
             with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
                 with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3'):
@@ -46,7 +67,6 @@ class HardwareCalibrationPanel:
                         self.tau_pk_input = ui.number('Shaper Peaking Time (s)', value=self.system.hw_profile.get('shaper_s_tau_pk', HARDWARE_DEFAULTS['shaper_s_tau_pk']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'shaper_s_tau_pk': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         self.tau_top_input = ui.number('Shaper Flat Top (s)', value=self.system.hw_profile.get('shaper_s_tau_pk_top', HARDWARE_DEFAULTS['shaper_s_tau_pk_top']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'shaper_s_tau_pk_top': e.value})).props('dense outlined').classes('flex-1 text-xs')
                     with ui.row().classes('w-full gap-3'):
-                        # FIXED: Decoupled `.props()` completely out of internal lambda parameter body
                         self.tau_d_input = ui.number('Detector Decay Tau_d (s)', value=self.system.hw_profile.get('tau_d', HARDWARE_DEFAULTS['tau_d']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'tau_d': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         self.tau_r_input = ui.number('Detector Rise Tau_r (s)', value=self.system.hw_profile.get('tau_r', HARDWARE_DEFAULTS['tau_r']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'tau_r': e.value})).props('dense outlined').classes('flex-1 text-xs')
                     with ui.row().classes('w-full gap-3 items-center justify-between'):
@@ -55,6 +75,7 @@ class HardwareCalibrationPanel:
 
         with ui.row().classes('w-full mt-3 justify-end'):
             def save_calibration_profile_to_database():
+                """Persists the profile to disk and, if possible, programs the board."""
                 logger.warning(f"[CALIB_PANEL] Operator clicked COMMIT button for S/N: {self.system.serial_number}")
                 self.system.db[self.system.serial_number] = {k: v for k, v in self.system.hw_profile.items()}
                 if self.system.save_hardware_db():

@@ -10,6 +10,5 @@ package = false
 members = [
     "utils/spectrum_recorder",
     "daq-core/NSIL-MCA-DPP4SiPM/sw/python-api",
-    "ml-core",
     "gui"
 ]

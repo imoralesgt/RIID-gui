@@ -1,3 +1,11 @@
+"""Application entry point: NiceGUI page shell and top-level app wiring.
+
+Instantiates the shared :class:`~riid_service.RIIDCoreService` backend
+singleton, registers the app-startup hardware probe, and builds the four-tab
+station UI (:class:`RIIDSpectroscopyApp`) served at the root ``/`` route.
+Run directly with ``uv run main.py`` (see the repository README).
+"""
+
 from nicegui import app, ui
 import os
 from config import BRAND_COLORS, logger
@@ -33,6 +41,7 @@ ML_MODEL_NAME = 'cnn_multilabel'
 backend_service = RIIDCoreService(ml_model_name = ML_MODEL_NAME)
 
 async def runtime_bootstrap_sequence():
+    """App-startup hook: probes for hardware and starts the background service loops."""
     logger.info("[BOOT] Triggering system bootstrap sequence initialization...")
     try:
         await backend_service.initialize_and_probe()
@@ -44,10 +53,13 @@ async def runtime_bootstrap_sequence():
 app.on_startup(runtime_bootstrap_sequence)
 
 class RIIDSpectroscopyApp:
+    """The top-level four-tab station UI, one instance per connected browser client."""
+
     def __init__(self):
+        """Builds the workspace, sets the initial tab title, and starts the UI sync timer."""
         logger.info("[UI_MOUNT] Instantiating client session application station interface...")
-        
-        # FIXED: Explicit tracking initialization variable
+
+        # Explicit tracking initialization variable
         self.current_applied_sys_id = None
         
         # Explicitly define direct widget instance tracking anchors
@@ -168,12 +180,10 @@ class RIIDSpectroscopyApp:
                             ui.label('|').classes('text-xs font-mono text-zinc-300 mx-2')
                             self.banner_status_pill = ui.label("").classes('text-xs font-mono font-bold')
                         
-                        # Global Interlock Connectivity Banner View Card - a
-                        # compact strip rather than the old full-page-width bar,
-                        # but no longer truncated/max-width-constrained either -
-                        # the full status message must stay readable, so this
-                        # sizes to its own content instead of cropping with an
-                        # ellipsis.
+                        # Global Interlock Connectivity Banner View Card - sized to
+                        # its own content rather than a fixed max-width, so the
+                        # full status message always stays readable instead of
+                        # being cropped with an ellipsis.
                         self.connection_alert_banner = ui.row().classes('items-center gap-2 px-3 py-1 rounded-lg border shadow-sm transition-all duration-300')
                         with self.connection_alert_banner:
                             self.banner_icon = ui.icon('report_problem', size='xs')
@@ -234,7 +244,7 @@ class RIIDSpectroscopyApp:
         else:
             self.station_id_badge.set_text(f"Station: {current_sys_id} (looking for hardware...)")
 
-        # FIXED: Reactive hot-plug browser tab title adjustment
+        # Reactive hot-plug browser tab title adjustment
         if self.current_applied_sys_id != current_sys_id:
             logger.warning(f"[UI_SYNC] Dynamic profile shift detected in title string context ({self.current_applied_sys_id} -> {current_sys_id}). Re-writing window title...")
             self.update_browser_tab_title()
@@ -300,15 +310,16 @@ class RIIDSpectroscopyApp:
             self.banner_text.set_text("⚠️ MCA HARDWARE CRITICAL FAILURE: Connection broken or device disconnected. Checking port link auto-discovery loop...")
             self.banner_status_pill.set_text("DISCONNECTED").classes(add='text-red-800', remove='text-green-800')
 
-        # NOTE: DPP parameters are no longer pushed to the board from this polling tick.
-        # They are only ever transmitted by push_active_profile_to_board(), which is
-        # called explicitly from: (1) initial hardware probe on app/service launch,
+        # NOTE: DPP parameters are never pushed to the board from this polling tick.
+        # They are only transmitted by push_active_profile_to_board(), called
+        # explicitly from: (1) initial hardware probe on app/service launch,
         # (2) the operator pressing COMMIT CALIBRATION PARAMETERS, and (3) hardware
         # reconnection recovery in the heartbeat loop.
 
 
 @ui.page('/')
 def index():
+    """Serves the station UI at the root route - one fresh app instance per client."""
     RIIDSpectroscopyApp()
 
 if __name__ in {"__main__", "__mp_main__"}:

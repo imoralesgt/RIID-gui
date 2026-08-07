@@ -1,3 +1,14 @@
+"""Backend service layer for the RIID station.
+
+Owns the DAQ hardware handle, the background/continuous-survey/batch
+acquisition loops, the ML inference pipeline invocation, and spectrum file
+I/O (SPE/JSON read-write, zip bundling, delete). The view modules
+(``view_spectrum_id.py``, ``view_recording.py``, ``view_download.py``,
+``view_calibration.py``) all drive the UI by calling into a single shared
+:class:`RIIDCoreService` instance rather than touching the hardware or disk
+directly.
+"""
+
 import os
 import json
 import io
@@ -14,13 +25,20 @@ from ml_inference import MlInference
 from ml_preprocessing import MLPreprocessing
 
 class RIIDCoreService:
-    # Centralized folder destination constant (issue #57: was the flat DATA_DIR
-    # root - batch .spe/.json output now lives under data/spectra/batch/ so it
-    # can sit alongside the future background/riid export folders without
-    # everything being dumped into one directory).
+    """Central hardware/service orchestration hub for the RIID station.
+
+    Manages the lifecycle of the DAQ device handle, runs the background,
+    continuous-survey, and batch-recording acquisition loops as asyncio
+    tasks, invokes the ML classification pipeline on each survey tick, and
+    handles all spectrum file I/O (SPE/JSON persistence, zip bundling for
+    download, deletion). A single instance is constructed in ``main.py`` and
+    shared by every view module for the lifetime of the app.
+    """
+
+    # Centralized folder destination constant.
     OUTPUT_FOLDER = SPECTRA_BATCH_DIR
 
-    # Issue #46: maps each bulk-download category to its data/spectra/ subfolder.
+    # Maps each bulk-download category to its data/spectra/ subfolder.
     SPECTRA_CATEGORY_DIRS = {
         'background': SPECTRA_BACKGROUND_DIR,
         'batch': SPECTRA_BATCH_DIR,
@@ -45,7 +63,7 @@ class RIIDCoreService:
     # set_ml_model), now a single source of truth referenced by both.
     DEFAULT_ML_MIN_COUNTS = 10
 
-    # Issue #38 (updated): dynamic hysteresis (auto-reset) model, replacing
+    # Dynamic hysteresis (auto-reset) model, replacing
     # the old static total-count threshold. That static value caused two
     # opposite problems reported in practice: a high-activity source (e.g.
     # Eu-152) could hit it in ~1s, forcing a reset every 1-3s - too fast to
@@ -75,10 +93,10 @@ class RIIDCoreService:
     HYSTERESIS_WINDOW_SAMPLES = 5
     # Used only as a fallback multiplier for the brief window before the
     # first peak-channel-rate sample exists (see
-    # _compute_dynamic_hysteresis_threshold) - the main formula is additive
-    # (min_counts + rate*TARGET_TIME_S) and no longer needs a multiplicative
-    # floor at all, since that additive term alone already guarantees the
-    # threshold sits comfortably above min_counts once a real rate is known.
+    # _compute_dynamic_hysteresis_threshold). The main formula is additive
+    # (min_counts + rate*TARGET_TIME_S), whose additive term alone already
+    # guarantees the threshold sits comfortably above min_counts once a real
+    # rate is known - so no multiplicative floor is needed once that's true.
     HYSTERESIS_FLOOR_MULTIPLIER = 1.6
     # A single channel reaching this is implausible even at very high total
     # count rates - a photopeak typically captures only a modest fraction of
@@ -112,6 +130,13 @@ class RIIDCoreService:
     CPS_HISTORY_LEN = 240
 
     def __init__(self, ml_model_name : str):
+        """Builds the service in its idle, pre-hardware-probe state.
+
+        Args:
+            ml_model_name (str): Name of the ML model to load for RIID
+                classification (see ``ml_inference.MlInference``). Models
+                live under ``gui/ml_models/``.
+        """
         logger.info("[SERVICE_INIT] Initializing spectroscopy operations hub...")
         self.system = SpectrumAcquisitionSystem()
         self.system.sync_hardware_profile()
@@ -134,16 +159,15 @@ class RIIDCoreService:
         
         # Trigger thresholds for automated identification pipelines
         self.max_counts_limit = self.DEFAULT_MAX_COUNTS_LIMIT
-        # Issue #38: enabled by default (dynamic peak-channel-based auto-reset).
+        # Enabled by default (dynamic peak-channel-based auto-reset).
         # When disabled, max_counts_limit above is used directly as a manually-
         # set threshold instead - still compared against the peak single
         # channel, never the integral spectrum count, in either mode.
         self.auto_hysteresis_enabled = True
         
-        # Spectrum plot display preference - was previously only created lazily
-        # by the view layer (ControlPanelSidebar's __init__), which broke once
-        # SpectrumPlotContainer (constructed first, in main.py) started reading
-        # it directly for its own relocated log-scale checkbox (issue #39).
+        # Must be initialized here, not lazily by the view layer -
+        # SpectrumPlotContainer, constructed before ControlPanelSidebar in
+        # main.py, reads this directly for its own log-scale checkbox.
         self.use_log_scale = False
         
         # Configuration presets for structural automated multi-run recordings
@@ -162,22 +186,20 @@ class RIIDCoreService:
         self.bg_progress = 0.0
         # Hardware live/real time captured for the last background spectrum
         # (either recorded fresh via _bg_recording_sequence, or loaded from a
-        # file via load_background_spectrum). Was previously live-time only -
-        # save_background_spectrum() used to duplicate this into the "real
-        # time" field of saved files instead of measuring it separately.
+        # file via load_background_spectrum). Tracked as two independently
+        # measured values, since real time can differ from live time
+        # whenever there's dead time during the capture.
         self.bg_hardware_live_time_ms = 0.0
         self.bg_hardware_real_time_ms = 0.0
-        # Same fix as above, applied to the continuous survey / RIID spectrum:
-        # previously only tmr_c (live time) was tracked during
-        # _continuous_survey_sequence, and build_riid_download_zip() duplicated
-        # it into the "real time" field instead of measuring it separately.
+        # Same independent live/real-time tracking, for the continuous
+        # survey / RIID spectrum.
         self.survey_hardware_live_time_ms = 0.0
         self.survey_hardware_real_time_ms = 0.0
         
         self.current_isotope_id = "Standby"
         self.status_text = "System Initialized"
         
-        # Issue #37 (RIID results redesign): the model name for the "Model"
+        # The model name for the "Model"
         # metric card, and the FULL per-class probability breakdown from the
         # most recent successful inference (all classes, not just ones above
         # self.ml_inference.CLASSIFICATION_THRESHOLD) for the Class Probabilities
@@ -191,7 +213,7 @@ class RIIDCoreService:
         # line every ~1s poll tick during a long survey.
         self._last_logged_detection = None
         
-        # Issue #34: rolling window of (elapsed_seconds, instantaneous_cps, source)
+        # Rolling window of (elapsed_seconds, instantaneous_cps, source)
         # samples for the count-rate-over-time plot - distinct from the
         # existing cumulative-average CPS shown in the spectrum plot's legend.
         # source is 'survey' or 'bg', so the plot can color each segment to
@@ -213,7 +235,7 @@ class RIIDCoreService:
         # clear_cps_history() - the same explicit action that clears the history.
         self._cps_history_time_offset_s = 0.0
         
-        # Issue #38: sliding window of recent instantaneous peak-channel-rate
+        # Sliding window of recent instantaneous peak-channel-rate
         # samples (background-subtracted spectrum), used by
         # _compute_dynamic_hysteresis_threshold() - deliberately NOT reset on
         # an automatic hysteresis-cycle reset (only by clear_cps_history(),
@@ -321,8 +343,10 @@ class RIIDCoreService:
         """Programs the current calibration/DPP parameters onto the physical board.
         
         This is invoked ONLY under two conditions:
+
           1. The app/service is launched for the first time (see initialize_and_probe).
           2. The operator presses COMMIT CALIBRATION PARAMETERS (see view_calibration.py).
+
         (A hardware reconnect after a physical disconnect is treated the same as an
         initial probe, since the board's configuration is assumed lost on power-cycle -
         see _hardware_heartbeat_loop.)
@@ -367,13 +391,11 @@ class RIIDCoreService:
         gain, BLR, etc.), which stays reserved for push_active_profile_to_board()
         only (hardware probe / an explicit calibration commit).
         
-        Delegates straight to DaqCommands.set_timers_preset(), the new
-        middleware-layer method added for this purpose (issue #34 in the
-        daq-core repo / issue #49 here). Application code no longer needs to
-        reach into the HAL - constructing Dpp_Timers or importing DppSubmodules
-        directly, as the earlier stopgap version of this method did - since the
-        Python API now owns that read-modify-write against the Timers DPP
-        submodule (group 4) internally.
+        Delegates straight to DaqCommands.set_timers_preset(), so this code
+        never needs to reach into the HAL directly (constructing Dpp_Timers
+        or importing DppSubmodules) - the Python API owns that
+        read-modify-write against the Timers DPP submodule (group 4)
+        internally.
         
         Returns True on success, False if there's no programmed handle or the
         transmission failed (callers should fall back to pure software timing)."""
@@ -527,14 +549,13 @@ class RIIDCoreService:
             if self.state == 'BG_RECORDING':
                 self.background_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
                 
-                # FIXED: Extract final absolute background hardware live-time directly from the MCA registers
+                # Extract final absolute background hardware live-time directly from the MCA registers
                 final_bg_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 self.bg_hardware_live_time_ms = float(final_bg_timers.get("tmr_c", self.bg_target_time * 1000))
-                # FIXED: tmr_a (real time, per the timers_a_live_time=False config
-                # set at DPP programming time) was never being read here - every
-                # saved background previously had its "real time" field silently
-                # duplicated from live time instead of actually measured, which
-                # is only coincidentally correct at zero dead time.
+                # tmr_a (real time, per the timers_a_live_time=False config set
+                # at DPP programming time) is read separately from live time -
+                # equating the two would only be coincidentally correct at
+                # zero dead time.
                 self.bg_hardware_real_time_ms = float(final_bg_timers.get("tmr_a", self.bg_hardware_live_time_ms) or self.bg_hardware_live_time_ms)
                 self.bg_accumulated_seconds = int(self.bg_hardware_live_time_ms / 1000)
                 
@@ -719,13 +740,13 @@ class RIIDCoreService:
                     self.current_isotope_id = "Accumulating Counts..."
                     continue
                 
-                # FIXED: Read hardware live-time straight from the active survey session registers
+                # Read hardware live-time straight from the active survey session registers
                 survey_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
                 self.survey_hardware_live_time_ms = float(survey_timers.get("tmr_c", 0))
                 self.survey_elapsed_seconds = int(self.survey_hardware_live_time_ms / 1000)
-                # FIXED: tmr_a (real time) was never read here - build_riid_download_zip()
-                # was duplicating live time into the "real time" field instead of
-                # measuring it separately, the same bug background had before its fix.
+                # tmr_a (real time) is read separately from live time - the two
+                # are expected to differ whenever there's dead time during the
+                # survey, so build_riid_download_zip() must not conflate them.
                 self.survey_hardware_real_time_ms = float(survey_timers.get("tmr_a", self.survey_hardware_live_time_ms) or self.survey_hardware_live_time_ms)
                 
                 hardware_spectrum_array = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
@@ -738,7 +759,7 @@ class RIIDCoreService:
                 total_counts = sum(self.live_spectrum) if self.live_spectrum else 0
                 self.status_text = f"Survey Active ({self.survey_elapsed_seconds}s). Total Counts: {total_counts}"
                 
-                # Issue #34: instantaneous count rate = counts accumulated SINCE the
+                # Instantaneous count rate = counts accumulated SINCE the
                 # last poll, divided by the time elapsed since that poll - distinct
                 # from the existing cumulative-average CPS shown in the plot legend,
                 # which smooths out over the whole session instead of showing recent
@@ -752,14 +773,13 @@ class RIIDCoreService:
                 self._prev_survey_counts = total_counts
                 self._prev_survey_elapsed_s = live_time_s
                 
-                # Issue #38 (updated): the auto-reset trigger is now the PEAK
-                # SINGLE CHANNEL of the background-subtracted spectrum - the
-                # exact same metric MlInference itself checks against
-                # min_counts before attempting classification - not the
-                # total/integral spectrum count used previously. Reuses
-                # compute_background_subtracted_spectrum() (the same method
-                # backing the "Spectrum - Background" visualization) rather
-                # than a separate implementation.
+                # The auto-reset trigger is the PEAK SINGLE CHANNEL of the
+                # background-subtracted spectrum - the exact same metric
+                # MlInference itself checks against min_counts before
+                # attempting classification, not the total/integral spectrum
+                # count. Reuses compute_background_subtracted_spectrum() (the
+                # same method backing the "Spectrum - Background"
+                # visualization) rather than a separate implementation.
                 default_bg_ms = self.DEFAULT_BG_TARGET_TIME_S * 1000
                 bg_ms = float(getattr(self, 'bg_hardware_live_time_ms', default_bg_ms) or default_bg_ms)
                 subtracted_spectrum = self.compute_background_subtracted_spectrum(
@@ -768,7 +788,7 @@ class RIIDCoreService:
                 )
                 peak_channel_value = float(max(subtracted_spectrum)) if subtracted_spectrum else 0.0
                 
-                # Issue #38: sliding-window instantaneous rate sample (counts
+                # Sliding-window instantaneous rate sample (counts
                 # accumulated in the peak channel SINCE the last poll, divided
                 # by the time since that poll) - the same delta-based pattern
                 # cps_history above uses, so the rate estimate stays reactive
@@ -851,17 +871,17 @@ class RIIDCoreService:
             logger.error(f"[HARDWARE] Continuous survey thread encountered an exception: {e}", exc_info=True)
             self.status_text = f"Survey Error: {e}"; self.state = 'IDLE'
         finally:
-            # Runs on every exit path - normal loop exit, an error above, OR task
-            # cancellation (stop_execution() calls _main_loop_task.cancel(), which
-            # throws CancelledError into whatever await this coroutine is suspended
-            # on - almost always asyncio.sleep(1.0) mid-poll. CancelledError is a
-            # BaseException, so it skips the `except Exception` above entirely and
-            # previously skipped this stop call too, since it used to live right
-            # after the while loop instead of here. Without it, STOP left the
-            # hardware physically running: it kept accumulating real counts (later
-            # silently wiped by the next START's forced BRAM-clear) AND kept
-            # incrementing Timer C the whole time acquisition sat "stopped" - which
-            # is exactly what inflated the elapsed time relative to true counts.
+            # Must live in `finally`, not right after the while loop, so it also
+            # runs on task cancellation - normal loop exit, an error above, OR
+            # STOP (stop_execution() calls _main_loop_task.cancel(), which throws
+            # CancelledError into whatever await this coroutine is suspended on,
+            # almost always asyncio.sleep(1.0) mid-poll). CancelledError is a
+            # BaseException, so it skips the `except Exception` above entirely.
+            # Without this stop call here, the hardware keeps physically running
+            # after STOP: it keeps accumulating real counts (later silently
+            # wiped by the next START's forced BRAM-clear) AND keeps
+            # incrementing Timer C the whole time acquisition sits "stopped" -
+            # inflating the elapsed time relative to true counts.
             try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
             except: pass
             try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
@@ -872,7 +892,7 @@ class RIIDCoreService:
     def _execute_ml_pipeline(self, raw_spectrum: list[int], live_time : int) -> str:
         """Executes ML pipeline on live spectrum data.
         
-        Issue #37: MlInference.inference_pipeline() now returns the FULL
+        MlInference.inference_pipeline() now returns the FULL
         per-class probability breakdown (all classes, not just detected ones) -
         stored here in self.last_ml_result for the RIID results panel's Class
         Probabilities bar chart / Detected Isotopes / Avg Confidence cards.
@@ -884,12 +904,12 @@ class RIIDCoreService:
             self.last_ml_result = result
             detected = {k: v for k, v in result.items() if v > self.ml_inference.CLASSIFICATION_THRESHOLD}
             
-            # Log the actual identification result/event - the GUI already
-            # displays this, but nothing was previously recording it in the
-            # log for an audit trail. Only fires when the detected set
-            # actually changes (a new isotope appears, the set changes, or it
-            # clears back to nothing), not every ~1s poll tick, which would
-            # otherwise spam an identical line throughout a long survey.
+            # Also logs the identification result for an audit trail (the GUI
+            # already displays it, but doesn't otherwise get recorded). Only
+            # fires when the detected set actually changes (a new isotope
+            # appears, the set changes, or it clears back to nothing), not
+            # every ~1s poll tick, which would otherwise spam an identical
+            # line throughout a long survey.
             current_detection_key = frozenset(detected.keys())
             if current_detection_key != self._last_logged_detection:
                 if detected:
@@ -913,7 +933,7 @@ class RIIDCoreService:
 
     def set_ml_classification_threshold(self, new_threshold: float):
         """Passthrough to MlInference.update_classification_threshold() - the
-        entry point the GUI's Detection Threshold slider (issue #67) calls,
+        entry point the GUI's Detection Threshold slider calls,
         so the view layer doesn't need to reach into self.ml_inference
         directly."""
         self.ml_inference.update_classification_threshold(new_threshold)
@@ -929,7 +949,7 @@ class RIIDCoreService:
         self.ml_inference.update_min_counts(int(new_min_counts))
 
     def set_auto_hysteresis_enabled(self, enabled: bool):
-        """Issue #38 (updated): toggles automatic mode for BOTH the hysteresis
+        """Toggles automatic mode for BOTH the hysteresis
         reset threshold and the ML trigger threshold (min_counts) together -
         called by the GUI's "Automatic hysteresis" checkbox."""
         self.auto_hysteresis_enabled = bool(enabled)
@@ -943,12 +963,12 @@ class RIIDCoreService:
         logger.warning(f"[USER_ACTION] Operator {'enabled' if enabled else 'disabled'} automatic hysteresis reset.")
 
     def set_manual_hysteresis_threshold(self, new_threshold: int):
-        """Issue #38: sets the operator's manual peak-single-channel-count
+        """Sets the operator's manual peak-single-channel-count
         threshold, used only while auto_hysteresis_enabled is False."""
         self.max_counts_limit = int(new_threshold)
 
     def set_ml_model(self, model_name: str) -> tuple:
-        """Issue #67: swaps the active ML model at runtime (cnn_multilabel /
+        """Swaps the active ML model at runtime (cnn_multilabel /
         cnn_deep). Reconstructs self.ml_inference with the new model, since
         MlInference doesn't support hot-swapping its underlying model file -
         but carries the current background data, classification threshold,
@@ -993,7 +1013,7 @@ class RIIDCoreService:
             return False, f"Failed to switch model: {e}"
 
     def compute_background_subtracted_spectrum(self, spectrum_data: list, spectrum_live_time_s: float, bg_data: list, bg_live_time_s: float) -> list:
-        """Issue #39 ("Spectrum - Background" visualization template): reuses
+        """Reuses
         MLPreprocessing.subtract_background() - the exact same background
         subtraction step MlInference.inference_pipeline() runs before feeding
         a spectrum to the model - instead of maintaining a second, separate
@@ -1035,7 +1055,7 @@ class RIIDCoreService:
         return result.tolist()
 
     def clear_cps_history(self):
-        """Clears the count-rate plot's rolling history (issue #34's plot).
+        """Clears the count-rate plot's rolling history.
         Triggered by either its own dedicated Clear button OR the spectrum's
         own CLEAR (both are explicit "start fresh" actions) - only the
         automatic hysteresis-cycle buffer reset leaves the history alone, so
@@ -1050,7 +1070,7 @@ class RIIDCoreService:
         self._prev_bg_counts = 0
         self._prev_bg_elapsed_s = 0.0
         self._cps_history_time_offset_s = 0.0
-        # Issue #38: same explicit-clear-only rule as cps_history above - an
+        # Same explicit-clear-only rule as cps_history above - an
         # automatic hysteresis-cycle reset leaves this alone (see the
         # buffer-reset branch), only an explicit CLEAR/RESTART wipes it.
         self._peak_channel_rate_history.clear()
@@ -1060,7 +1080,7 @@ class RIIDCoreService:
         logger.warning("[USER_ACTION] Operator cleared the count-rate plot history.")
 
     def _compute_dynamic_hysteresis_threshold(self) -> int:
-        """Issue #38 (updated again): additive model, not a clamped
+        """Additive model, not a clamped
         multiplicative floor. See the HYSTERESIS_* class constants above for
         the sliding-window averaging. This method's own change is structural:
         
@@ -1237,9 +1257,7 @@ class RIIDCoreService:
                 base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
                 spectrum_id = f"RUN_{run_idx}"
                 
-                # Single source of truth for both file formats below (issue #42: the
-                # .spe file was carrying less metadata than the .json - sources,
-                # attenuators, and detector info were missing from it).
+                # Single source of truth for both file formats below.
                 metadata = self._build_spectrum_metadata(
                     num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s, real_time_s=final_real_s
                 )
@@ -1272,9 +1290,7 @@ class RIIDCoreService:
     def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float, real_time_s: float) -> dict:
         """Assembles the full metadata block attached to a recorded spectrum. This is
         the single source of truth reused by both the .json and .spe writers, so the
-        two file formats always carry identical information (issue #42: previously
-        the .spe file's $SPE_REM section only had a handful of fields while the
-        .json had richer metadata like sources/attenuators/detector info)."""
+        two file formats always carry identical information."""
         prof = self.system.hw_profile
         rt = self.system.runtime_metadata
         vga_gain = float(prof.get("vga_gain_coarse", 6.0) or 6.0)
@@ -1300,8 +1316,6 @@ class RIIDCoreService:
             "Energy calibration quadratic (keV/ch2)": prof.get("calib_a2", 0.0),
             "Spectrum acquisition date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "Spectrum live time (s)": live_time_s,
-            # issue #54, requirement 3: previously computed (final_real_s) but never
-            # actually passed through into this dict, so it never reached the JSON.
             "Spectrum real time (s)": real_time_s,
             "Sequence run index": run_idx,
         }
@@ -1364,14 +1378,14 @@ class RIIDCoreService:
             sf.write("$ENDRECORD:\n")
 
     def save_background_spectrum(self, filename: str, save_json: bool = True, save_spe: bool = True) -> tuple[bool, str]:
-        """Persists the latest recorded background spectrum to disk (issue #45),
+        """Persists the latest recorded background spectrum to disk,
         in JSON and/or SPE format as requested. Reuses the exact same
         _build_spectrum_metadata()/_write_spe_file() pipeline as batch
-        recordings (issue #42's prerequisite) instead of duplicating any
+        recordings instead of duplicating any
         serialization logic, so detector/calibration/source metadata is
         included identically to how batch spectra files are stored.
         
-        Per issue #45 requirement 4, "Material type" is forced to "background"
+        "Material type" is forced to "background"
         on a COPY of the metadata used for this save only - the live
         runtime_metadata dict (used elsewhere for batch/sources) is left
         untouched.
@@ -1400,11 +1414,10 @@ class RIIDCoreService:
             base_filepath = os.path.join(SPECTRA_BACKGROUND_DIR, safe_filename)
             
             live_time_s = float(self.bg_hardware_live_time_ms or 0.0) / 1000.0
-            # FIXED: previously duplicated from live_time_s (see
-            # _bg_recording_sequence / load_background_spectrum) - now both
-            # timers are captured/loaded independently, so this reflects the
-            # actual measured real time, which is expected to differ from live
-            # time whenever there's any dead time during the capture.
+            # Measured independently from live_time_s (see
+            # _bg_recording_sequence / load_background_spectrum) - expected
+            # to differ from live time whenever there's any dead time during
+            # the capture.
             real_time_s = float(self.bg_hardware_real_time_ms or 0.0) / 1000.0
             
             metadata = self._build_spectrum_metadata(
@@ -1440,9 +1453,9 @@ class RIIDCoreService:
             return False, f"Failed to save background spectrum: {e}"
 
     def build_riid_download_zip(self) -> tuple:
-        """Issue #41: persists the current spectrum shown in the RIID view
+        """Persists the current spectrum shown in the RIID view
         (self.live_spectrum) to data/spectra/riid/ - genuinely written to disk,
-        named with the UTC timestamp (issue #64) of the moment this was called
+        named with the UTC timestamp of the moment this was called
         - then bundles it together with the current background spectrum, both
         in .json and .spe formats, into a single .zip for download.
         
@@ -1476,9 +1489,8 @@ class RIIDCoreService:
             os.makedirs(SPECTRA_RIID_DIR, exist_ok=True)
             riid_base = os.path.join(SPECTRA_RIID_DIR, safe_filename)
             
-            # FIXED: previously duplicated from live time (see
-            # _continuous_survey_sequence, which now reads tmr_a separately) -
-            # this reflects the actual measured real time.
+            # Measured independently from live time (see
+            # _continuous_survey_sequence, which reads tmr_a separately).
             riid_live_s = float(self.survey_hardware_live_time_ms or 0.0) / 1000.0
             riid_real_s = float(self.survey_hardware_real_time_ms or 0.0) / 1000.0
             riid_metadata = self._build_spectrum_metadata(
@@ -1533,7 +1545,7 @@ class RIIDCoreService:
     def list_available_background_files(self) -> list:
         """Lists .json/.spe files available in the background spectra folder
         (data/spectra/background/), for the "load pre-recorded background"
-        picker (issue #44). Returns bare filenames only (no path) - the file
+        picker. Returns bare filenames only (no path) - the file
         system location stays known only to the service layer, matching how
         save_background_spectrum() already keeps that internal."""
         try:
@@ -1549,7 +1561,7 @@ class RIIDCoreService:
 
     def load_background_spectrum(self, filename: str) -> tuple:
         """Loads a pre-recorded background spectrum from a .json or .spe file
-        in data/spectra/background/ (issue #44), as an alternative to
+        in data/spectra/background/, as an alternative to
         recording a fresh one via start_background_recording(). The current
         "record new" flow is untouched by this - this is purely an additional
         path into the same self.background_spectrum/bg_hardware_live_time_ms
@@ -1692,7 +1704,7 @@ class RIIDCoreService:
 
     def list_spectra_files(self, category: str, ext_filter: str = 'ALL') -> list:
         """Lists files available for bulk download in a data/spectra/ category
-        folder (issue #46).
+        folder.
         
         Args:
             category (str): One of 'background', 'batch', 'riid'.
@@ -1728,7 +1740,7 @@ class RIIDCoreService:
 
     def build_spectra_zip(self, category: str, filenames: list):
         """Bundles the requested files from a data/spectra/ category folder into
-        an in-memory .zip archive for bulk download (issue #46).
+        an in-memory .zip archive for bulk download.
         
         Args:
             category (str): One of 'background', 'batch', 'riid'.
@@ -1846,7 +1858,8 @@ class RIIDCoreService:
     def clear_survey_data(self):
         """Explicitly wipes the accumulated survey spectrum trace (and its associated
         timers/state) on operator demand. This is the ONLY path that resets the live
-        spectrum now - starting a new survey run no longer does this automatically.
+        spectrum - starting a new survey run resumes on top of it instead (see
+        start_continuous_survey), so an explicit CLEAR is required.
         Works both while idle and while a survey is actively accumulating: in the
         latter case the running acquisition loop performs the hardware-level reset
         on its next tick and keeps surveying, so STOP is not required first.

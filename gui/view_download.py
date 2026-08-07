@@ -1,16 +1,19 @@
+"""The Spectra Download tab: bulk file management for recorded spectra.
+
+:class:`SpectraDownloadPanel` renders one sub-tab per category (Background,
+Batch, RIID); each sub-tab is a :class:`_CategoryDownloadSection` handling
+that category's file picker, multi-select download, and delete.
+"""
+
 from datetime import datetime
 from nicegui import ui
 from config import BRAND_COLORS, logger
 
 
 class SpectraDownloadPanel:
-    """Issue #46: lets the operator bulk-download recorded spectra files from
-    any of the three data/spectra/ subfolders (background, batch, riid), each
-    in its own tab with a "select all" checkbox and an extension filter.
-
-    Originally built as a card inside the Spectrum Recording tab, but moved
-    into its own top-level "Spectra Download" tab (between Spectrum Recording
-    and Hardware & Calibration) since it was making that tab too crowded."""
+    """Lets the operator bulk-download recorded spectra files from any of the
+    three data/spectra/ subfolders (background, batch, riid), each in its own
+    tab with a "select all" checkbox and an extension filter."""
 
     # (category key passed to the service, display label for the tab)
     CATEGORIES = [
@@ -20,11 +23,17 @@ class SpectraDownloadPanel:
     ]
 
     def __init__(self, service):
+        """Builds the panel's per-category tabs.
+
+        Args:
+            service (RIIDCoreService): The shared backend service instance.
+        """
         self.service = service
         self.sections = {}
         self.render_layout()
 
     def render_layout(self):
+        """Builds the category tab bar and one `_CategoryDownloadSection` per tab."""
         with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white gap-3').style('border-color: #E2E8F0;'):
             ui.label('Download Recorded Spectra').classes('text-sm font-bold').style(f"color: {BRAND_COLORS['primary']};")
 
@@ -43,6 +52,13 @@ class _CategoryDownloadSection:
     SpectraDownloadPanel - one instance per tab."""
 
     def __init__(self, service, category: str, label: str):
+        """Builds this category's file picker/download/delete UI.
+
+        Args:
+            service (RIIDCoreService): The shared backend service instance.
+            category (str): One of 'background', 'batch', 'riid'.
+            label (str): Display label used in confirmation messages.
+        """
         self.service = service
         self.category = category
         self.label = label
@@ -50,6 +66,7 @@ class _CategoryDownloadSection:
         self.render()
 
     def render(self):
+        """Builds the extension filter, file list, and download/delete buttons."""
         with ui.row().classes('w-full gap-2 items-end pt-1'):
             self.ext_filter = ui.select(
                 {'ALL': 'All (.json + .spe)', 'JSON': 'JSON only', 'SPE': 'SPE only'},
@@ -88,6 +105,7 @@ class _CategoryDownloadSection:
                 confirm_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1')
 
     def refresh_files(self):
+        """Reloads this category's file list from disk, applying the extension filter."""
         self.checkboxes = {}
         self.file_list_container.clear()
         files = self.service.list_spectra_files(self.category, self.ext_filter.value)
@@ -99,10 +117,12 @@ class _CategoryDownloadSection:
                 self.checkboxes[f] = ui.checkbox(f).classes('text-xs')
 
     def toggle_select_all(self, e):
+        """Checks or unchecks every file checkbox to match the "Select All" state."""
         for cb in self.checkboxes.values():
             cb.set_value(e.value)
 
     def download_selected(self):
+        """Bundles the checked files into a zip and triggers a browser download."""
         selected = [f for f, cb in self.checkboxes.items() if cb.value]
         if not selected:
             ui.notify("Select at least one file to download.", type="negative")
@@ -133,6 +153,7 @@ class _CategoryDownloadSection:
         self.delete_dialog.open()
 
     def execute_delete(self):
+        """Permanently deletes the checked files after the operator confirms."""
         selected = [f for f, cb in self.checkboxes.items() if cb.value]
         ok, msg = self.service.delete_spectra_files(self.category, selected)
         self.delete_dialog.close()

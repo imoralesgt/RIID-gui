@@ -1,0 +1,52 @@
+name: GUI docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gui/**"
+      - ".github/workflows/gui-docs.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  markdown-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install docs dependencies
+        working-directory: gui
+        run: uv sync --group docs
+
+      - name: Generate markdown API reference
+        working-directory: gui
+        run: |
+          uv run --group docs --no-sync lazydocs \
+            --output-path docs/reference \
+            --src-base-url "https://github.com/${{ github.repository }}/blob/main/" \
+            config main riid_service state_engine ml_inference ml_preprocessing \
+            view_spectrum_id view_recording view_download view_calibration
+        env:
+          PYTHONPATH: .
+
+      - name: Commit updated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gui/docs/reference/*.md
+          git diff --staged --quiet || git commit -m "docs(gui): regenerate API reference [skip ci]"
+          git push
