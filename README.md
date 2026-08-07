@@ -59,11 +59,11 @@ The primary live-survey workspace:
 - **Background spectrum workflow** — record a fresh background, load a previously saved one, or save the currently recorded background to disk (JSON and/or SPE format). A background must exist before a survey can be started.
 - **Survey controls** — start/stop a continuous survey, restart (clear the accumulated survey without touching the background), and download the current survey + background bundle as a `.zip` (JSON and SPE).
 
-![Spectrum ID tab: overlaid live survey and background, with Cs-137 detected at 100% confidence](assets/screenshots/spectrum_id.png)
+![Spectrum ID tab: overlaid live survey and background, with Cs-137 detected at 100% confidence](docs/res/spectrum_id.png)
 
 The "Spectrum - Background" visualization mode shows the same survey with the background subtracted out — this is the view that reflects what the ML pipeline itself actually reasons over (its limit-of-detection gate and inference both run against the background-subtracted spectrum, not the raw overlay):
 
-![Spectrum ID tab: background-subtracted view isolating the Cs-137 photopeak](assets/screenshots/spectrum_id_subtracted.png)
+![Spectrum ID tab: background-subtracted view isolating the Cs-137 photopeak](docs/res/spectrum_id_subtracted.png)
 
 ### Spectrum Recording
 
@@ -73,13 +73,13 @@ Batch/multi-run spectrum acquisition with experiment metadata:
 - **Shielding / absorber layers** — attach shielding material entries (element, thickness, notes) to the run; session-only, not persisted to a database.
 - **Batch recording** — configure live-time per run, number of runs, and a filename prefix, then start/stop an automated multi-run acquisition sequence. Live plot (with its own independent log-scale toggle), count-rate, and total-counts readouts update as each run completes.
 
-![Spectrum Recording tab: registered source and shielding layer alongside a completed batch run's spectrum](assets/screenshots/spectrum_recording.png)
+![Spectrum Recording tab: registered source and shielding layer alongside a completed batch run's spectrum](docs/res/spectrum_recording.png)
 
 ### Spectra Download
 
 Bulk file management for everything the station has written to disk, organized into three categories — Background, Batch, and RIID — each with select-all, multi-file download, and permanent delete (with confirmation).
 
-![Spectra Download tab: RIID category file listing with select-all, download, and delete controls](assets/screenshots/spectra_download.png)
+![Spectra Download tab: RIID category file listing with select-all, download, and delete controls](docs/res/spectra_download.png)
 
 ### Hardware & Calibration
 
@@ -88,7 +88,7 @@ Bulk file management for everything the station has written to disk, organized i
 - **Advanced MCA/DPP settings** — VGA gain, channel smoothing, shaper peaking/flat-top times, detector rise/decay time constants, baseline restorer threshold gain, and pulse polarity inversion.
 - **Commit** — persists the profile (keyed by the board's serial number) and pushes the DPP parameters down to the physical board.
 
-![Hardware & Calibration tab: instrument identity, energy calibration coefficients, and advanced MCA/DPP settings](assets/screenshots/hardware_calibration.png)
+![Hardware & Calibration tab: instrument identity, energy calibration coefficients, and advanced MCA/DPP settings](docs/res/hardware_calibration.png)
 
 ## Machine learning model (RIID)
 
