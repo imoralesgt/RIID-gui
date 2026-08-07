@@ -15,23 +15,20 @@ jobs:
   markdown-docs:
     runs-on: ubuntu-latest
     steps:
-      - name: TEMP DEBUG - check submodule deploy key secret is set
-        env:
-          KEY: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then
-            echo "::error::SUBMODULE_DEPLOY_KEY is empty or not reaching this workflow (wrong secret name, wrong repo, or an Environment secret not granted to this job)."
-            exit 1
-          fi
-          echo "Secret is present, length: ${#KEY} characters (expect ~400+ for an ed25519 private key block)."
-          echo "First line: $(echo "$KEY" | head -n1)"
-          echo "Last line: $(echo "$KEY" | tail -n1)"
-
-      - name: Checkout repository (with submodules)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          ssh-key: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+          submodules: false
+
+      - name: Set up SSH for the private submodule
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+
+      - name: Fetch submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
