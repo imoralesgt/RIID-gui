@@ -2,7 +2,7 @@
 
 A web-based graphical user interface for radioisotope identification (RIID) built around the NSIL-MCA-DPP4SiPM DAQ system. Developed by the Nuclear Science and Instrumentation Laboratory (NSIL) at the International Atomic Energy Agency (IAEA).  The GUI queries live spectrum acquisition from the gamma detector, background subtraction, on-device ML-based isotope classification, batch spectrum recording with source/shielding metadata, spectra download, and hardware/energy calibration — all from the web browser.
 
-Source-level documentation (module/class/function reference, generated with Sphinx) is published from `gui/docs/` at every merge to `main` — see [Generating the docs](#generating-the-docs) below to build it locally.
+Source-level documentation (module/class/function reference, generated from docstrings) lives in [`gui/README.md`](gui/README.md) and `gui/docs/reference/`, kept in sync with `main` automatically — see [Generating the docs](#generating-the-docs) below to regenerate it locally.
 
 ## Repository layout
 
@@ -114,14 +114,16 @@ A class only counts as "detected" (surfaced in the Detected Isotopes metric card
 
 ## Generating the docs
 
-The GUI's source-level reference documentation is built with [Sphinx](https://www.sphinx-doc.org/) from the docstrings in `gui/*.py`, and is automatically rebuilt and published to GitHub Pages on every merge to `main` (see `.github/workflows/gui-docs.yml`).
+The GUI's source-level reference documentation ([`gui/README.md`](gui/README.md) + `gui/docs/reference/*.md`) is generated from the docstrings in `gui/*.py` via [lazydocs](https://github.com/ml-tooling/lazydocs) — the same tool already used for the `daq-core/NSIL-MCA-DPP4SiPM` submodule's `python-api` reference. It's automatically regenerated and committed back to `main` on every push that touches `gui/**` (see `.github/workflows/gui-docs.yml`).
 
-To build it locally:
+To regenerate it locally:
 
 ```bash
 cd gui
 uv sync --group docs
-uv run --group docs sphinx-build -b html docs docs/_build/html
+PYTHONPATH=. uv run --group docs lazydocs \
+  --output-path docs/reference \
+  --src-base-url "https://github.com/imoralesgt/RIID-gui/blob/main/" \
+  config main riid_service state_engine ml_inference ml_preprocessing \
+  view_spectrum_id view_recording view_download view_calibration
 ```
-
-Open `gui/docs/_build/html/index.html` in a browser to view it.

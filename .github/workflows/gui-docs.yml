@@ -1,25 +1,18 @@
-name: Build and publish GUI docs
+name: GUI docs
 
 on:
   push:
     branches: [main]
     paths:
       - "gui/**"
-      - "daq-core/**"
       - ".github/workflows/gui-docs.yml"
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write
 
 jobs:
-  build:
+  markdown-docs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (with submodules)
@@ -39,22 +32,21 @@ jobs:
         working-directory: gui
         run: uv sync --group docs
 
-      - name: Build Sphinx docs
+      - name: Generate markdown API reference
         working-directory: gui
-        run: uv run --group docs sphinx-build -W -b html docs docs/_build/html
+        run: |
+          uv run --group docs --no-sync lazydocs \
+            --output-path docs/reference \
+            --src-base-url "https://github.com/${{ github.repository }}/blob/main/" \
+            config main riid_service state_engine ml_inference ml_preprocessing \
+            view_spectrum_id view_recording view_download view_calibration
+        env:
+          PYTHONPATH: .
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: gui/docs/_build/html
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Commit updated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gui/docs/reference/*.md
+          git diff --staged --quiet || git commit -m "docs(gui): regenerate API reference [skip ci]"
+          git push
