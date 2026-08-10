@@ -1,0 +1,5 @@
+[project]
+name = "uno-q-mcu-only"
+version = "0.1.0"
+description = "Pure MCU Sketch for Arduino Uno Q"
+requires-python = ">=3.10"

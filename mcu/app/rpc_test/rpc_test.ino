@@ -2,6 +2,7 @@
 
 const int TEMP_PIN = A0;
 
+
 void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
     
