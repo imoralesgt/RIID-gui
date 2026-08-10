@@ -111,7 +111,7 @@ def main():
         time.sleep(0.5)
     
     try:
-        value = bridge.call("read_sensor")
+        value = bridge.call("read_temperature")
         print(f"Sensor value: {value}")
     except Exception as e:
         print(f"Error: {e}")
