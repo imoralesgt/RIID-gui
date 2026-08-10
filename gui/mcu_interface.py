@@ -2,8 +2,9 @@ import socket
 import msgpack
 import threading
 import time
+from config import logger
 
-class ArduinoBridge:
+class __ArduinoBridge:
     def __init__(self, socket_path="/var/run/arduino-router.sock"):
         self.socket_path = socket_path
         self.sock = None
@@ -95,8 +96,52 @@ class ArduinoBridge:
                 self.pending_responses[msgid]["result"] = result
                 self.pending_responses[msgid]["event"].set()
 
+class ArduinoInterface:
+
+    STATUS = {
+        0: "IDLE",
+        1: "BKGND_REC",
+        2: "SURVEY_NO_RIID",
+        3: "SURVEY_RIID_OK"
+    }
+
+    CHARS_SPECIAL = " +_-*/="
+    CHARS_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    CHARS_NUMBERS = "0123456789"
+
+
+    def __init__(self):
+        self.bridge = __ArduinoBridge()
+        if not self.bridge.connect():
+            logger.error("Failed to connect to Arduino")
+        else:
+            logger.info("Connected to Arduino")
+
+    def update_status(self, status_index : int) -> None:
+        logger.info(f"Updating status in Arduino to {status_index}:{self.STATUS[status_index]}")
+        self.bridge.notify("update_status", status_index)
+
+    def __sanitize_text(self, text : str) -> str:
+        sanitized_text = ''
+        text = text.upper()
+        for char in text:
+            if char not in self.CHARS_LETTERS and char not in self.CHARS_NUMBERS and char not in self.CHARS_SPECIAL:
+                sanitized_text += '_'
+            else:
+                sanitized_text += char
+        return text
+
+    def update_text(self, text : str) -> None:
+        logger.info(f"Received text to update in Arduino: {text}")
+        sanitized_text = self.__sanitize_text(text)
+
+        if text != sanitized_text:
+            logger.warning(f"Text contained invalid characters, sanitized to: {sanitized_text}")
+
+        self.bridge.notify("update_text_matrix", sanitized_text)
+
 def main():
-    bridge = ArduinoBridge()
+    bridge = __ArduinoBridge()
     
     if not bridge.connect():
         print("Failed to connect")
