@@ -159,7 +159,7 @@ class ArduinoInterface:
 
         text = text.upper()
         for char in text:
-            if char not in self.CHARS_LETTERS and char not in self.CHARS_NUMBERS and char not in self.CHARS_SPECIAL:
+            if (char not in self.CHARS_LETTERS) and (char not in self.CHARS_SPECIAL) and (char not in self.CHARS_NUMBERS):
                 sanitized_text += FALLBACK_CHAR
             else:
                 sanitized_text += char
