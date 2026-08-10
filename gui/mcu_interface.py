@@ -121,11 +121,6 @@ class ArduinoInterface:
         else:
             logger.info("Connected to Arduino")
 
-    def __del__(self):
-        """Gracefully disconnects from the Arduino RPC router upon instance destruction.
-        """
-        self.disconnect()
-
     def disconnect(self):
         """Gracefully disconnects from the Arduino RPC router.
         """
