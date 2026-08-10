@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Arduino Uno Q (MCU Only)",
+            "includePath": [
+                "${workspaceFolder}/app/sketch/**",
+                "${userHome}/.arduino15/packages/arduino/hardware/stm32/**",
+                "${userHome}/Arduino/libraries/**"
+            ],
+            "defines": [
+                "ARDUINO=10819",
+                "ARDUINO_UNO_Q",
+                "__STM32U585xx__"
+            ],
+            "compilerPath": "${userHome}/.arduino15/packages/arduino/tools/arm-none-eabi-gcc/bin/arm-none-eabi-g++",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-arm"
+        }
+    ],
+    "version": 4
+}

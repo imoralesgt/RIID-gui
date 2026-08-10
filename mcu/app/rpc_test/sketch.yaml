@@ -1,0 +1,6 @@
+default_profile: uno_q_profile
+
+profiles:
+  uno_q_profile:
+    board: arduino:zephyr:unoq
+    port: /dev/ttyACM0
