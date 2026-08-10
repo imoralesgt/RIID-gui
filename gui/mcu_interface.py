@@ -188,19 +188,19 @@ def main():
     arduino_if = ArduinoInterface()
 
     for i in range(10):
-        arduino_if.update_status(arduino_if.STATUS.keys()[0])
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[0])
         arduino_if.update_text("HELLO WORLD+TEST_&!INVALID CHAR")
         time.sleep(2)
 
-        arduino_if.update_status(arduino_if.STATUS.keys()[1])
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[1])
         arduino_if.update_text("Short text, no special chars")
         time.sleep(2)
 
-        arduino_if.update_status(arduino_if.STATUS.keys()[2])
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[2])
         arduino_if.update_text("Status - no RIID")
         time.sleep(2)
 
-        arduino_if.update_status(arduino_if.STATUS.keys()[3])
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[3])
         arduino_if.clear_text()
         time.sleep(2)
     
