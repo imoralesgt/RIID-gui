@@ -14,7 +14,7 @@ const int LED_R = LED4_R;
 const int LED_G = LED4_G;
 const int LED_B = LED4_B;
 
-uint16_t scrollSpeed;
+int scrollSpeed;
 
 
 void setup() {
@@ -42,7 +42,7 @@ void loop() {
     matrix.beginDraw();
     matrix.stroke(0xFFFFFFFF);
     matrix.textFont(Font_5x7);
-    matrix.textScrollSpeed(80);
+    matrix.textScrollSpeed(scrollSpeed);
 
     matrix.beginText(0, 1, 0xFFFFFF);
     matrix.print(messageBuffer);
@@ -79,7 +79,7 @@ void update_status_led(int status) {
     }
 }
 
-void set_scroll_speed(uint16_t speed) {
+void set_scroll_speed(int speed) {
     scrollSpeed = speed;
 }
 
