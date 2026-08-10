@@ -4,7 +4,7 @@ import threading
 import time
 from config import logger
 
-class __ArduinoBridge:
+class _ArduinoBridge:
     def __init__(self, socket_path="/var/run/arduino-router.sock"):
         self.socket_path = socket_path
         self.sock = None
@@ -114,7 +114,7 @@ class ArduinoInterface:
 
 
     def __init__(self):
-        self.bridge = __ArduinoBridge()
+        self.bridge = _ArduinoBridge()
         if not self.bridge.connect():
             logger.error("Failed to connect to Arduino RPC router service.")
             raise Exception("Failed to connect to Arduino RPC router service.")
