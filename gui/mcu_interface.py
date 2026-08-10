@@ -153,11 +153,14 @@ class ArduinoInterface:
         Returns:
             str: The sanitized text
         """
+
+        FALLBACK_CHAR = '_'
         sanitized_text = ''
+
         text = text.upper()
         for char in text:
             if char not in self.CHARS_LETTERS and char not in self.CHARS_NUMBERS and char not in self.CHARS_SPECIAL:
-                sanitized_text += '_'
+                sanitized_text += FALLBACK_CHAR
             else:
                 sanitized_text += char
 
@@ -181,6 +184,19 @@ class ArduinoInterface:
         sanitized_text = self.__sanitize_text(text)
         self.bridge.notify(self.RPC_UPDATE_TEXT_FUNC, sanitized_text)
 
+    def update_scroll_speed(self, speed : int) -> None:
+        """Updates the scroll speed shown in the LED matrix of the Arduino Q board.
+        Leverages the existing RPC router instance initialized in the class constructor.
+
+        Args:
+            speed (int): The scroll speed to be displayed on the LED matrix
+
+        Returns:
+            None
+        """
+        logger.info(f"Received scroll speed to update in MCU LED matrix display: {speed}")
+        self.bridge.notify("update_scroll_speed", speed)
+
     def clear_text(self):
         self.update_text("")
 
@@ -190,14 +206,17 @@ def main():
     for i in range(10):
         arduino_if.update_status(list(arduino_if.STATUS.keys())[0])
         arduino_if.update_text("HELLO WORLD+TEST_&!INVALID CHAR")
+        arduino_if.update_scroll_speed(100);
         time.sleep(2)
 
         arduino_if.update_status(list(arduino_if.STATUS.keys())[1])
         arduino_if.update_text("Short text, no special chars")
+        arduino_if.update_scroll_speed(200);
         time.sleep(2)
 
         arduino_if.update_status(list(arduino_if.STATUS.keys())[2])
         arduino_if.update_text("Status - no RIID")
+        arduino_if.update_scroll_speed(40);
         time.sleep(2)
 
         arduino_if.update_status(list(arduino_if.STATUS.keys())[3])

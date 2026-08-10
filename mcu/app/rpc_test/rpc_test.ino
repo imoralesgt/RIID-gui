@@ -4,13 +4,17 @@
 
 ArduinoLEDMatrix matrix;
 
+
 const uint16_t BUF_SIZE = 256;
+const uint16_t SCROLL_SPEED_DEFAULT = 80;
 char messageBuffer[BUF_SIZE] = "Starting RIID...";
 
 const int TEMP_PIN = A0;
 const int LED_R = LED4_R;
 const int LED_G = LED4_G;
 const int LED_B = LED4_B;
+
+uint16_t scrollSpeed;
 
 
 void setup() {
@@ -22,15 +26,14 @@ void setup() {
     digitalWrite(LED_G, 1);
     digitalWrite(LED_B, 1);
 
+    set_scroll_speed(SCROLL_SPEED_DEFAULT);
+
     matrix.begin();
     
     Bridge.begin();
     Bridge.provide("update_text_matrix", update_text_matrix);
     Bridge.provide("update_status_led", update_status_led);
-    
-    Monitor.begin();
-    Monitor.println("Temperature sensor ready");
-
+    Bridge.provide("set_scroll_speed", set_scroll_speed);
     
 }
 
@@ -39,7 +42,7 @@ void loop() {
     matrix.beginDraw();
     matrix.stroke(0xFFFFFFFF);
     matrix.textFont(Font_5x7);
-    matrix.textScrollSpeed(40);
+    matrix.textScrollSpeed(80);
 
     matrix.beginText(0, 1, 0xFFFFFF);
     matrix.print(messageBuffer);
@@ -74,6 +77,10 @@ void update_status_led(int status) {
             digitalWrite(LED_G, 1);
             digitalWrite(LED_B, 1);
     }
+}
+
+void set_scroll_speed(uint16_t speed) {
+    scrollSpeed = speed;
 }
 
 void update_text_matrix(String text) {
