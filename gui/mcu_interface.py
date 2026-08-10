@@ -207,21 +207,21 @@ def main():
         arduino_if.update_status(list(arduino_if.STATUS.keys())[0])
         arduino_if.update_text("HELLO WORLD+TEST_&!INVALID CHAR")
         arduino_if.update_scroll_speed(100);
-        time.sleep(2)
+        time.sleep(5)
 
         arduino_if.update_status(list(arduino_if.STATUS.keys())[1])
         arduino_if.update_text("Short text, no special chars")
         arduino_if.update_scroll_speed(200);
-        time.sleep(2)
+        time.sleep(5)
 
         arduino_if.update_status(list(arduino_if.STATUS.keys())[2])
         arduino_if.update_text("Status - no RIID")
         arduino_if.update_scroll_speed(40);
-        time.sleep(2)
+        time.sleep(5)
 
         arduino_if.update_status(list(arduino_if.STATUS.keys())[3])
         arduino_if.clear_text()
-        time.sleep(2)
+        time.sleep(5)
     
     arduino_if.disconnect()
 
