@@ -490,6 +490,18 @@ class RIIDCoreService:
         self.background_spectrum = []
         self.live_spectrum = []
         self.bg_target_time = target_time
+
+        # Starting a new background recording is always a hard break in the
+        # count-rate plot's timeline, never a continuation - whatever ran
+        # before (a survey the operator merely STOPped without CLEARing, a
+        # batch job, a prior background) is unconditionally wiped rather than
+        # bridged across via the x-axis time-offset, which only bridges
+        # cleanly when every intervening activity remembers to bank its own
+        # contribution into it. The hardware live-time timer gets the same
+        # fresh start via _bg_recording_sequence()'s own timers_reset() call,
+        # right after this, before acquisition begins.
+        self.clear_cps_history()
+
         self.set_state('BG_RECORDING')
         self.current_isotope_id = "Recording Background..."
         self._main_loop_task = asyncio.create_task(self._bg_recording_sequence())
