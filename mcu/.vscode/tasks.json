@@ -4,7 +4,7 @@
         {
             "label": "Compile Arduino MCU Sketch",
             "type": "shell",
-            "command": "arduino-cli compile --fqbn arduino:zephyr:unoq .",
+            "command": "arduino-cli compile --fqbn arduino:zephyr:unoq . --outputu-dir ../build",
             "options": {
                 "cwd": "${workspaceFolder}/app/riid_viz"
             },
@@ -14,7 +14,7 @@
         {
             "label": "Fast deploy and run",
             "type": "shell",
-            "command": "arduino-cli upload --fqbn arduino:zephyr:unoq --port /dev/ttyACM0 .",
+            "command": "arduino-cli upload --fqbn arduino:zephyr:unoq --port /dev/ttyACM0 ../build",
             "options": {
                 "cwd": "${workspaceFolder}/app/riid_viz"
             },

@@ -3,6 +3,8 @@ default_profile: uno_q_profile
 profiles:
   uno_q_profile:
     fqbn: arduino:zephyr:unoq
+    platforms:
+      - platform: arduino:zephyr
     port: /dev/ttyACM0
     libraries:
       - ArduinoGraphics (1.1.5)
