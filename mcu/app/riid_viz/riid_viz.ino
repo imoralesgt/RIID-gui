@@ -2,34 +2,37 @@
 #include "ArduinoGraphics.h"
 #include "Arduino_LED_Matrix.h"
 
+// Onboard matrix display library
 ArduinoLEDMatrix matrix;
 
-
+// Text buffer size and scroll speed (pause between updates in ms)
 const uint16_t BUF_SIZE = 256;
 const uint16_t SCROLL_SPEED_DEFAULT = 80;
 char messageBuffer[BUF_SIZE] = "Starting RIID...";
 
-const int TEMP_PIN = A0;
+// RGB LED pins for status visualization
 const int LED_R = LED4_R;
 const int LED_G = LED4_G;
 const int LED_B = LED4_B;
 
 int scrollSpeed;
 
-
 void setup() {
+    // Initialize LED pins
     pinMode(LED_R, OUTPUT);
     pinMode(LED_G, OUTPUT);
     pinMode(LED_B, OUTPUT);
 
+    // Set LED pins to high (inverse logic)
     digitalWrite(LED_R, 1);
     digitalWrite(LED_G, 1);
     digitalWrite(LED_B, 1);
 
-    set_scroll_speed(SCROLL_SPEED_DEFAULT);
-
+    // Initialize matrix display
     matrix.begin();
+    set_scroll_speed(SCROLL_SPEED_DEFAULT);
     
+    // Initialize RPC router for inter-processor (MPU<->MCU) communication
     Bridge.begin();
     Bridge.provide("update_text_matrix", update_text_matrix);
     Bridge.provide("update_status_led", update_status_led);
@@ -50,6 +53,18 @@ void loop() {
     matrix.endDraw();
 }
 
+/**
+ * Updates the status LED based on the RIID status. 
+ * 0: Idle -> Blue
+ * 1: Recording background -> Red
+ * 2: Surveying RIID (no result yet) -> Green
+ * 3: Surveying RIID (result found) -> Acqua (Green + Blue)
+ * 
+ * Intended to be used with the `update_status_led` RPC call.
+ * 
+ * @param status The status index
+ * 
+ */
 void update_status_led(int status) {
     switch(status) {
         case 0:
@@ -79,10 +94,24 @@ void update_status_led(int status) {
     }
 }
 
+/**
+ * Updates the text scroll speed for the LED matrix. Intended to be used
+ * with the `set_scroll_speed` RPC call.
+ * 
+ * @param speed The scroll speed: delay between updates, in milliseconds
+ */
 void set_scroll_speed(int speed) {
     scrollSpeed = speed;
 }
 
+/**
+ * Updates the buffer containing the text that will be displayed
+ * on the LED matrix. The text is truncated to BUF_SIZE - 5 characters to
+ * accommodate the scrolling effect. Intended to be used with the
+ * `update_text_matrix` RPC call.
+ * 
+ * @param text The text to be displayed on the LED matrix
+ */
 void update_text_matrix(String text) {
     strncpy(messageBuffer, text.c_str(), BUF_SIZE - 5);
     strcat(messageBuffer, "    ");
