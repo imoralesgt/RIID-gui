@@ -48,7 +48,7 @@ jobs:
           uv run --group docs --no-sync lazydocs \
             --output-path docs/reference \
             --src-base-url "https://github.com/${{ github.repository }}/blob/main/" \
-            config main riid_service state_engine ml_inference ml_preprocessing \
+            config main riid_service state_engine ml_inference ml_preprocessing mcu_interface \
             view_spectrum_id view_recording view_download view_calibration
         env:
           PYTHONPATH: .

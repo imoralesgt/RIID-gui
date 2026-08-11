@@ -8,11 +8,13 @@ The UNO Q has two processors on one board: a Linux-capable MPU (where `gui/` run
 
 | RPC method | Called from | Effect |
 |---|---|---|
-| `update_status_led(status: int)` | `ArduinoInterface.update_status` | Sets the RGB LED: `0`=idle (blue), `1`=recording background (red), `2`=surveying, no result yet (green), `3`=surveying, result found (aqua) |
+| `update_status_led(status: int)` | `ArduinoInterface.update_status` | Sets the RGB LED to match the RIID station's current state: `0`=`IDLE` (blue), `1`=`BG_RECORDING` (red), `2`=`RIID_SURVEY` (green), `3`=`BATCH_RECORDING` (purple = red + blue) |
 | `update_text_matrix(text: str)` | `ArduinoInterface.update_text` | Replaces the scrolling message on the LED matrix (GUI-side sanitized to `A-Z 0-9` and a small set of punctuation before sending) |
 | `set_scroll_speed(speed: int)` | `ArduinoInterface.update_scroll_speed` | Sets the delay (ms) between scroll steps on the matrix |
 
-This is a separate, active component from the early Arduino Uno Q **inference** target under `deprecated-ml-core/` (`inference.py`/`mcu.cpp`) — that one ran RIID classification on-device over serial and has been superseded by the GUI's own `ml_inference.py` pipeline. This sketch only renders status/text; it does no classification.
+The status index/color mapping mirrors `gui/mcu_interface.py`'s own `ArduinoInterface.STATUS` dict one-for-one — if either side's mapping ever changes, the other must be updated to match. On the GUI side, `RIIDCoreService.set_state()` (`gui/riid_service.py`) is the single place that pushes both the LED color and the matrix's state text together, exactly once per state transition; see [`gui/README.md`](../gui/README.md#mcu-integration-arduino-uno-q) for how the rest of the integration (live RIID detection text during a survey, etc.) is wired up on the GUI side.
+
+This is a separate, active component from the early Arduino Uno Q **inference** target under `ml-core/` (`inference.py`/`mcu.cpp`) — that one ran RIID classification on-device over serial and has been superseded by the GUI's own `ml_inference.py` pipeline, and is no longer used in production (see the root [README](../README.md#machine-learning-model-riid)). This sketch only renders status/text; it does no classification.
 
 ## Layout
 
