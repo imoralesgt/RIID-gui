@@ -7,13 +7,14 @@
 set -euo pipefail
 
 FQBN="${FQBN:-arduino:zephyr:unoq}"
-SKETCH_DIR="${1:-.}"
 UPLOAD_TIMEOUT="${UPLOAD_TIMEOUT:-20}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/_common.sh"
 load_env "$SCRIPT_DIR"
+
+SKETCH_DIR="${1:-$SCRIPT_DIR/../app/riid_viz}"
 
 BOARDS_FILE="${BOARDS_FILE:-$SCRIPT_DIR/../boards.txt}"
 if [[ ! -f "$BOARDS_FILE" ]]; then

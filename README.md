@@ -8,6 +8,7 @@ Source-level documentation (module/class/function reference, generated from docs
 
 - `gui/` — the NiceGUI web application (this is what you run).
 - `daq-core/NSIL-MCA-DPP4SiPM/` — git submodule containing the DAQ board firmware/hardware sources and its `python-api` communications package, which the GUI depends on to talk to the board.
+- `mcu/` — Arduino UNO Q sketch driving the station's onboard RGB LED and LED matrix as a physical status display, remote-controlled by the GUI over RPC. See [`mcu/README.md`](mcu/README.md).
 - `deprecated-ml-core/` — **DEPRECATED**, not a `uv` workspace member. Historical record of the RIID model R&D: preprocessing/inference prototypes, the Keras→TFLite conversion notebook, an early Arduino Uno Q deployment target, and real-hardware validation spectra. See [Machine learning model (RIID)](#machine-learning-model-riid) below.
 - `utils/spectrum_recorder/` — standalone spectrum recording utility/library.
 
