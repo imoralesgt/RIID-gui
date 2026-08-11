@@ -8,7 +8,7 @@ The UNO Q has two processors on one board: a Linux-capable MPU (where `gui/` run
 
 | RPC method | Called from | Effect |
 |---|---|---|
-| `update_status_led(status: int)` | `ArduinoInterface.update_status` | Sets the RGB LED to match the RIID station's current state: `0`=`IDLE` (blue), `1`=`BG_RECORDING` (red), `2`=`RIID_SURVEY` (green), `3`=`BATCH_RECORDING` (purple = red + blue) |
+| `update_status_led(status: int)` | `ArduinoInterface.update_status` | Sets the RGB LED to match the RIID system's current state: `0`=`IDLE` (blue), `1`=`BG_RECORDING` (red), `2`=`RIID_SURVEY` (green), `3`=`BATCH_RECORDING` (purple = red + blue) |
 | `update_text_matrix(text: str)` | `ArduinoInterface.update_text` | Replaces the scrolling message on the LED matrix (GUI-side sanitized to `A-Z 0-9` and a small set of punctuation before sending) |
 | `set_scroll_speed(speed: int)` | `ArduinoInterface.update_scroll_speed` | Sets the delay (ms) between scroll steps on the matrix |
 
