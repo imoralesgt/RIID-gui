@@ -2,6 +2,9 @@
 #include "ArduinoGraphics.h"
 #include "Arduino_LED_Matrix.h"
 
+#define TEXT_SPACES_PRE  2
+#define TEXT_SPACES_POST 5
+
 // Onboard matrix display library
 ArduinoLEDMatrix matrix;
 
@@ -58,7 +61,7 @@ void loop() {
  * 0: Idle -> Blue
  * 1: Recording background -> Red
  * 2: Surveying RIID -> Green
- * 3: Batch recording -> Acqua (Green + Blue)
+ * 3: Batch recording -> Purple (Red + Blue)
  * 
  * Intended to be used with the `update_status_led` RPC call.
  * 
@@ -83,8 +86,8 @@ void update_status_led(int status) {
             digitalWrite(LED_B, 1);
             break;
         case 3:
-            digitalWrite(LED_R, 1);
-            digitalWrite(LED_G, 0);
+            digitalWrite(LED_R, 0);
+            digitalWrite(LED_G, 1);
             digitalWrite(LED_B, 0);
             break;
         default:
@@ -113,6 +116,8 @@ void set_scroll_speed(int speed) {
  * @param text The text to be displayed on the LED matrix
  */
 void update_text_matrix(String text) {
-    strncpy(messageBuffer, text.c_str(), BUF_SIZE - 5);
-    strcat(messageBuffer, "    ");
+    memset(messageBuffer, 0, BUF_SIZE);
+    memset(messageBuffer, ' ', TEXT_SPACES_PRE);
+    strncpy(messageBuffer + TEXT_SPACES_PRE, text.c_str(), BUF_SIZE - TEXT_SPACES_PRE - TEXT_SPACES_POST);
+    strcat(messageBuffer, "     ");
 }
