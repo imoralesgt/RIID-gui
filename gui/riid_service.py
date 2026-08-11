@@ -311,6 +311,7 @@ class RIIDCoreService:
         if self.mcu_iface.get_status():
             # Valid status strings: "IDLE", "BG_RECORDING", "RIID_SURVEY", "BATCH_RECORDING"
             self.mcu_iface.update_status(self.mcu_iface.lookup_state_idx(state_string))
+            self.mcu_iface.update_text(state_string)
 
     def reinitialize_daq_handle(self):
         """Destroys any stale driver reference and instantiates a fresh one, transmitting
