@@ -5,7 +5,7 @@ profiles:
     fqbn: arduino:zephyr:unoq
     platforms:
       - platform: arduino:zephyr
-    port: /dev/ttyACM0
+    port: /dev/ttyACM1
     libraries:
       - ArduinoGraphics (1.1.5)
       - Arduino_RouterBridge (0.4.3)
