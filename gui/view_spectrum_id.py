@@ -228,7 +228,7 @@ class SpectrumPlotContainer:
         # background is being shown in that case too). Checked here, early,
         # so it's never skipped by the render-signature cache below.
         show_frozen_survey_early = getattr(self.service, 'survey_stopped_with_data', False)
-        subtracted_mode_available = current_state == 'ACQUIRING_SURVEY' or show_frozen_survey_early
+        subtracted_mode_available = current_state == 'RIID_SURVEY' or show_frozen_survey_early
         if subtracted_mode_available:
             self.viz_mode_btn_subtracted.enable()
         else:
@@ -244,7 +244,7 @@ class SpectrumPlotContainer:
                 self._update_viz_mode_buttons()
                 self._last_render_signature = None
         
-        is_actively_recording = current_state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+        is_actively_recording = current_state in ('RIID_SURVEY', 'BG_RECORDING')
         
         # Cheap fingerprint of everything that could visually change the plot. While
         # nothing is actively being recorded, only redraw if this actually differs
@@ -276,7 +276,7 @@ class SpectrumPlotContainer:
 
         # 1. Resolve channel dimensions cleanly to manage mapping sizes
         show_frozen_survey = getattr(self.service, 'survey_stopped_with_data', False)
-        live_trace_active = spectrum_data and (current_state == 'ACQUIRING_SURVEY' or show_frozen_survey)
+        live_trace_active = spectrum_data and (current_state == 'RIID_SURVEY' or show_frozen_survey)
         num_channels = len(spectrum_data) if live_trace_active else len(bg_data)
         if num_channels == 0 and spectrum_data:
             num_channels = len(spectrum_data)
@@ -285,7 +285,7 @@ class SpectrumPlotContainer:
         
         # 2. Lifecycle step: Calculate the active real-time CPS metrics directly from MCA timers
         cps_raw_value = 0.0
-        if (current_state == 'ACQUIRING_SURVEY' or show_frozen_survey) and spectrum_data:
+        if (current_state == 'RIID_SURVEY' or show_frozen_survey) and spectrum_data:
             total_cts = sum(spectrum_data)
             survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
             survey_secs = float(survey_ms / 1000.0)
@@ -366,17 +366,24 @@ class SpectrumPlotContainer:
             # "Detected Isotopes" only lists actual isotopes, not the Background class.
             detected = {k: v for k, v in result.items() if k != 'Background' and v > threshold}
             if detected:
-                self.metric_isotopes_val.set_text(' + '.join(detected.keys()))
+                isotopes_text = ' + '.join(detected.keys())
+                self.metric_isotopes_val.set_text(isotopes_text)
                 self.metric_isotopes_val.style('color: ' + BRAND_COLORS['crimson_trace'] + ';')
                 avg_conf = sum(detected.values()) / len(detected)
                 self.metric_confidence_val.set_text(f"{avg_conf * 100:.1f}%")
                 self.metric_confidence_val.style('color: #059669;')
+                if self.service.mcu_iface.get_status():
+                    self.service.mcu_iface.update_text(isotopes_text)
+
             else:
-                bg_conf = result.get('Background', 0.0)
-                self.metric_isotopes_val.set_text('Background')
+                isotopes_text = 'Background'
+                bg_conf = result.get(isotopes_text, 0.0)
+                self.metric_isotopes_val.set_text(isotopes_text)
                 self.metric_isotopes_val.style('color: #374151;')
                 self.metric_confidence_val.set_text(f"{bg_conf * 100:.1f}%")
                 self.metric_confidence_val.style('color: #374151;')
+                if self.service.mcu_iface.get_status():
+                    self.service.mcu_iface.update_text(isotopes_text)
         else:
             self.metric_isotopes_val.set_text(self.service.current_isotope_id)
             self.metric_isotopes_val.style('color: #374151;')
@@ -411,7 +418,7 @@ class SpectrumPlotContainer:
         the operator's zoom/pan on this plot survives incoming data too."""
         history = list(getattr(self.service, 'cps_history', []) or [])
         current_state = self.service.state
-        is_actively_sampling = current_state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+        is_actively_sampling = current_state in ('RIID_SURVEY', 'BG_RECORDING')
         
         render_signature = (len(history), history[-1] if history else None, current_state)
         if not is_actively_sampling and render_signature == self._last_cps_render_signature:
@@ -514,7 +521,7 @@ class SpectrumPlotContainer:
         # that includes the frozen "Last Survey (Stopped)" display, not just an
         # actively-running one.
         show_frozen_survey = getattr(self.service, 'survey_stopped_with_data', False)
-        if state == 'ACQUIRING_SURVEY' or show_frozen_survey:
+        if state == 'RIID_SURVEY' or show_frozen_survey:
             survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
             time_scaling_factor = float(survey_ms / bg_ms)
             # Deliberately drops the "(Normalized to Xs)" duration
@@ -626,7 +633,7 @@ class SpectrumPlotContainer:
         peak_y = current_peak_y
         
         if spectrum_data and len(spectrum_data) == num_channels and sum(spectrum_data) > 0 and \
-           (state == 'ACQUIRING_SURVEY' or getattr(self.service, 'survey_stopped_with_data', False)):
+           (state == 'RIID_SURVEY' or getattr(self.service, 'survey_stopped_with_data', False)):
             live_max = float(max(spectrum_data))
             if live_max > peak_y:
                 peak_y = live_max
@@ -634,7 +641,7 @@ class SpectrumPlotContainer:
             processed_live_y = [val if val >= 1 else 1 for val in spectrum_data] if use_log else spectrum_data
             
             # Dynamically embed the current CPS metrics straight into the plot trace name label string
-            if state == 'ACQUIRING_SURVEY':
+            if state == 'RIID_SURVEY':
                 legend_label_name = f"Live Survey ({self._format_cps(cps_value)})"
             else:
                 legend_label_name = f"Last Survey (Stopped, {self._format_cps(cps_value)})"
@@ -687,7 +694,7 @@ class SpectrumPlotContainer:
         peak_y = 0.0
         if not (spectrum_data and len(spectrum_data) == num_channels):
             return peak_y
-        if not (state == 'ACQUIRING_SURVEY' or getattr(self.service, 'survey_stopped_with_data', False)):
+        if not (state == 'RIID_SURVEY' or getattr(self.service, 'survey_stopped_with_data', False)):
             return peak_y
         
         survey_ms = float(getattr(self.service, 'survey_hardware_live_time_ms', 0.0) or 0.0)
@@ -1095,7 +1102,7 @@ class ControlPanelSidebar:
         """Monitors status variables and dynamically updates the panel metrics text strings."""
         is_idle = self.service.state == 'IDLE'
         is_bg_running = self.service.state == 'BG_RECORDING'
-        is_survey_running = self.service.state == 'ACQUIRING_SURVEY'
+        is_survey_running = self.service.state == 'RIID_SURVEY'
         hw_ok = self.service.is_hardware_available
         has_bg = len(self.service.background_spectrum) > 0
 

@@ -23,6 +23,7 @@ from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
 from ml_preprocessing import MLPreprocessing
+from mcu_interface import ArduinoInterface
 
 class RIIDCoreService:
     """Central hardware/service orchestration hub for the RIID station.
@@ -147,9 +148,14 @@ class RIIDCoreService:
         # docstring for why this needs to be a real threading.Lock, not
         # asyncio.Lock).
         self._hw_lock = threading.Lock()
-        
+
+        # Microcontroller visualization interface: leveraging Arduino Uno Q's
+        # RPC router. Must be constructed before the first set_state() call
+        # below, since set_state() dereferences self.mcu_iface.
+        self.mcu_iface = ArduinoInterface()
+
         # Operational State Flags
-        self.state = 'IDLE'
+        self.set_state('IDLE')
         self.is_hardware_available = False
         
         # Dynamic Spectrum Vector Storage Buffers
@@ -255,7 +261,7 @@ class RIIDCoreService:
         
         # Tracks whether the last survey was halted by the operator (STOP) while
         # holding valid spectrum data, so the plot can keep rendering it "frozen"
-        # instead of disappearing once the state leaves ACQUIRING_SURVEY.
+        # instead of disappearing once the state leaves RIID_SURVEY.
         self.survey_stopped_with_data = False
         
         # Set by clear_survey_data() while a survey is actively running; the
@@ -297,6 +303,14 @@ class RIIDCoreService:
         """
         with self._hw_lock:
             return func(*args, **kwargs)
+
+    def set_state(self, state_string : str) -> None:
+        self.state = state_string
+
+        # Check whether the Arduino RPC bridge connection is valid before sending any update request
+        if self.mcu_iface.get_status():
+            # Valid status strings: "IDLE", "BG_RECORDING", "RIID_SURVEY", "BATCH_RECORDING"
+            self.mcu_iface.update_status(self.mcu_iface.loopback_status_idx(state_string))
 
     def reinitialize_daq_handle(self):
         """Destroys any stale driver reference and instantiates a fresh one, transmitting
@@ -475,9 +489,14 @@ class RIIDCoreService:
         self.background_spectrum = []
         self.live_spectrum = []
         self.bg_target_time = target_time
-        self.state = 'BG_RECORDING'
+        self.set_state('BG_RECORDING')
         self.current_isotope_id = "Recording Background..."
         self._main_loop_task = asyncio.create_task(self._bg_recording_sequence())
+
+        # Check whether the Arduino RPC bridge connection is valid before sending any update request
+        if self.mcu_iface.get_status():
+            # Valid status strings: 
+            self.mcu_iface.update_status(self.mcu_iface.loopback_status_idx('BKGND_REC'))
 
     async def _bg_recording_sequence(self):
         """Asynchronous worker for collecting background spectrum matrix arrays with accurate hardware live-time capture.
@@ -495,7 +514,7 @@ class RIIDCoreService:
         logger.info("[BACKGROUND_RUN] Async recording pipeline worker mounting...")
         if self.daq_device is None:
             logger.error("[BACKGROUND_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
-            self.status_text = "BG Error: Board not programmed"; self.state = 'IDLE'
+            self.status_text = "BG Error: Board not programmed"; self.set_state('IDLE')
             return
         
         # Give the board's own clock millisecond-precision control over when Timer C
@@ -562,7 +581,7 @@ class RIIDCoreService:
                 self.bg_progress = 1.0
                 self.status_text = "Background Spectrum Ready"
                 self.current_isotope_id = "BG Complete. Ready for Survey."
-                self.state = 'IDLE'
+                self.set_state('IDLE')
 
                 # Update ML model background
                 self.ml_inference.update_bkgnd_data(new_bkgnd_data=self.background_spectrum, new_bkgnd_live_time=self.bg_accumulated_seconds)
@@ -570,7 +589,7 @@ class RIIDCoreService:
                 logger.info(f"[BACKGROUND_RUN] Background spectrum saved. Pure HW Live-Time: {self.bg_hardware_live_time_ms} ms")
         except Exception as e:
             logger.error(f"[BACKGROUND_RUN] Pipeline error: {e}", exc_info=True)
-            self.status_text = f"BG Error: {e}"; self.state = 'IDLE'; self.bg_progress = 0.0
+            self.status_text = f"BG Error: {e}"; self.set_state('IDLE'); self.bg_progress = 0.0
         finally:
             # Runs on every exit path - normal completion, an error above, or an
             # aborted run (STOP pressed mid-BG, hardware lost, task cancelled).
@@ -619,7 +638,7 @@ class RIIDCoreService:
         if self.state != 'IDLE': return
         
         self.survey_stopped_with_data = False
-        self.state = 'ACQUIRING_SURVEY'
+        self.set_state('RIID_SURVEY')
         self.current_isotope_id = "Resuming Accumulation..." if self.live_spectrum else "Accumulating Counts..."
         self._main_loop_task = asyncio.create_task(self._continuous_survey_sequence())
 
@@ -653,7 +672,7 @@ class RIIDCoreService:
         logger.info("[SURVEY_RUN] Shared master API channel activated for live collection.")
         if self.daq_device is None:
             logger.error("[SURVEY_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
-            self.status_text = "Survey Error: Board not programmed"; self.state = 'IDLE'
+            self.status_text = "Survey Error: Board not programmed"; self.set_state('IDLE')
             return
         try:
             await asyncio.to_thread(self._call_hw, self.daq_device.open)
@@ -709,7 +728,7 @@ class RIIDCoreService:
                 self._prev_survey_elapsed_s = 0.0
             self._prev_survey_counts = sum(previous_spectrum) if previous_spectrum else 0
             
-            while self.state == 'ACQUIRING_SURVEY':
+            while self.state == 'RIID_SURVEY':
                 await asyncio.sleep(1.0)
                 if not self.verify_runtime_hardware_safety():
                     break
@@ -869,7 +888,7 @@ class RIIDCoreService:
                     
         except Exception as e:
             logger.error(f"[HARDWARE] Continuous survey thread encountered an exception: {e}", exc_info=True)
-            self.status_text = f"Survey Error: {e}"; self.state = 'IDLE'
+            self.status_text = f"Survey Error: {e}"; self.set_state('IDLE')
         finally:
             # Must live in `finally`, not right after the while loop, so it also
             # runs on task cancellation - normal loop exit, an error above, OR
@@ -1173,7 +1192,7 @@ class RIIDCoreService:
         logger.warning(f"[DAQ_ACTION] Operator triggered automated multi-run batch recording -> runs={total_runs}")
         if self.state != 'IDLE': return
         self.batch_target_time = target_time; self.batch_total_runs = total_runs; self.batch_prefix = prefix
-        self.state = 'BATCH_RECORDING'
+        self.set_state('BATCH_RECORDING')
         self._main_loop_task = asyncio.create_task(self._batch_recording_worker_loop())
 
     async def _batch_recording_worker_loop(self):
@@ -1285,7 +1304,7 @@ class RIIDCoreService:
                 try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
                 except: pass
                 
-        self.state = 'IDLE'; self.batch_status_text = "Batch measurements finished successfully."
+        self.set_state('IDLE'); self.batch_status_text = "Batch measurements finished successfully."
 
     def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float, real_time_s: float) -> dict:
         """Assembles the full metadata block attached to a recorded spectrum. This is
@@ -1821,9 +1840,9 @@ class RIIDCoreService:
         The last spectrum trace and identification result are left exactly as they were
         so the operator can still review what was captured before pressing STOP."""
         logger.warning(f"[SERVICE] Operator pressed STOP button. Halting acquisition out of state: {self.state}")
-        was_survey = self.state == 'ACQUIRING_SURVEY'
+        was_survey = self.state == 'RIID_SURVEY'
         
-        self.state = 'IDLE'
+        self.set_state('IDLE')
         self.batch_status_text = "Halted by Operator"
         
         if was_survey:
@@ -1846,7 +1865,7 @@ class RIIDCoreService:
         conflicting batch run or changing DAQ/calibration settings mid-survey
         (either of which could crash the hardware or corrupt the current
         measurement)."""
-        return self.state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+        return self.state in ('RIID_SURVEY', 'BG_RECORDING')
 
     @property
     def is_batch_recording_active(self) -> bool:
@@ -1864,14 +1883,14 @@ class RIIDCoreService:
         latter case the running acquisition loop performs the hardware-level reset
         on its next tick and keeps surveying, so STOP is not required first.
         The background spectrum profile is intentionally left untouched."""
-        if self.state not in ('IDLE', 'ACQUIRING_SURVEY'):
+        if self.state not in ('IDLE', 'RIID_SURVEY'):
             logger.warning(f"[SERVICE] CLEAR request rejected. Core state is busy: {self.state}")
             return
         
         logger.warning("[SERVICE] Operator pressed CLEAR button. Wiping accumulated survey spectrum (background spectrum preserved).")
         self._last_logged_detection = None
         
-        if self.state == 'ACQUIRING_SURVEY':
+        if self.state == 'RIID_SURVEY':
             # Let the active acquisition loop perform the actual hardware-level clear
             # on its own next tick rather than tearing down and rebuilding the survey.
             self.clear_requested = True
@@ -1906,7 +1925,7 @@ class RIIDCoreService:
         """Validates live connectivity during active data collection runs. Auto-halts on failure."""
         if not self.is_hardware_available:
             logger.critical("[ACQUISITION_GUARD] Live physical device connection lost mid-run! Intercepting crash...")
-            self.state = 'IDLE'
+            self.set_state('IDLE')
             self.status_text = "CRITICAL: Device Disconnected Mid-Run"
             self.batch_status_text = "CRITICAL: Run aborted due to hardware loss."
             self.current_isotope_id = "Hardware Lost"

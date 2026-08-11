@@ -100,9 +100,9 @@ class ArduinoInterface:
 
     STATUS = {
         0: "IDLE",
-        1: "BKGND_REC",
-        2: "SURVEY_NO_RIID",
-        3: "SURVEY_RIID_OK"
+        1: "BG_RECORDING",
+        2: "RIID_SURVEY",
+        3: "BATCH_RECORDING"
     }
 
     CHARS_SPECIAL = " +_-*/=."
@@ -115,17 +115,39 @@ class ArduinoInterface:
 
     def __init__(self):
         self.bridge = _ArduinoBridge()
+        self.__bridge_status = False
         if not self.bridge.connect():
-            logger.error("Failed to connect to Arduino RPC router service.")
-            raise Exception("Failed to connect to Arduino RPC router service.")
+            logger.warning("Failed to connect to Arduino RPC router service. Onboard display will not be enabled.")
         else:
-            logger.info("Connected to Arduino")
+            self.__bridge_status = True
+            logger.info("Connected to Arduino RPC bridge.")
+
+    def lookup_state_idx(self, state_str : str) -> int:
+        """Reverse dictionary lookup to get the index of a status string
+        from the `STATUS` class property.
+
+        Args:
+            state_str (str): The status string to lookup
+
+        Returns:
+            int: The index of the status
+        """
+        return list(self.STATUS.values()).index(state_str)
 
     def disconnect(self):
         """Gracefully disconnects from the Arduino RPC router.
         """
         logger.info("Gracefully disconnecting from the Arduino RPC router...")
         self.bridge.disconnect()
+
+    def get_status(self):
+        """
+        Returns the status of the RPC bridge, polled at the constructor.
+
+        Returns:
+            bool: The status of the RPC bridge
+        """
+        return self.__bridge_status
 
     def update_status(self, status_index : int) -> None:
         """Updates the status shown in the onboard RGB LED of the Arduino Q board.
@@ -140,8 +162,11 @@ class ArduinoInterface:
         Returns:
             None
         """
-        logger.info(f"Updating status in Arduino to {status_index}:{self.STATUS[status_index]}")
-        self.bridge.notify(self.RPC_UPDATE_STATUS_FUNC, status_index)
+        if self.__bridge_status:
+            logger.info(f"Updating status in Arduino to {status_index}:{self.STATUS[status_index]}")
+            self.bridge.notify(self.RPC_UPDATE_STATUS_FUNC, status_index)
+        else:
+            logger.warning("Cannot update status, RPC router is not connected.")
 
     def __sanitize_text(self, text : str) -> str:
         """Sanitizes the provided string by removing non-existing characters.
@@ -180,9 +205,12 @@ class ArduinoInterface:
         Returns:
             None
         """
-        logger.info(f"Received text to update in Arduino: {text}")
-        sanitized_text = self.__sanitize_text(text)
-        self.bridge.notify(self.RPC_UPDATE_TEXT_FUNC, sanitized_text)
+        if self.__bridge_status:
+            logger.info(f"Received text to update in Arduino: {text}")
+            sanitized_text = self.__sanitize_text(text)
+            self.bridge.notify(self.RPC_UPDATE_TEXT_FUNC, sanitized_text)
+        else:
+            logger.warning("Cannot update text, RPC router is not connected.")
 
     def update_scroll_speed(self, speed : int) -> None:
         """Updates the scroll speed shown in the LED matrix of the Arduino Q board.
@@ -194,8 +222,11 @@ class ArduinoInterface:
         Returns:
             None
         """
-        logger.info(f"Received scroll speed to update in MCU LED matrix display: {speed}")
-        self.bridge.notify("update_scroll_speed", speed)
+        if self.__bridge_status:
+            logger.info(f"Received scroll speed to update in MCU LED matrix display: {speed}")
+            self.bridge.notify("update_scroll_speed", speed)
+        else:
+            logger.warning("Cannot update scroll speed, RPC router is not connected.")
 
     def clear_text(self):
         self.update_text("")
