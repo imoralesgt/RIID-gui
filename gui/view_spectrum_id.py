@@ -361,7 +361,16 @@ class SpectrumPlotContainer:
         Accumulating, Recording Background, etc.)."""
         result = getattr(self.service, 'last_ml_result', None)
         threshold = getattr(self.service.ml_inference, 'CLASSIFICATION_THRESHOLD', 0.5)
-        
+        # This card keeps showing the frozen last_ml_result after STOP on
+        # purpose (so the operator can still review it) - but the LED matrix
+        # must NOT follow suit: set_state() already pushes the current state's
+        # own text (e.g. "IDLE") to the matrix exactly once, on the state
+        # transition itself, to match the RGB status LED (blue = idle/other,
+        # green = RIID_SURVEY). Only re-drive the matrix with RIID text while
+        # a survey is actually active, or this tick would keep clobbering that
+        # state text with a stale "Background"/isotope readout forever.
+        survey_active = self.service.state == 'RIID_SURVEY'
+
         if result:
             # "Detected Isotopes" only lists actual isotopes, not the Background class.
             detected = {k: v for k, v in result.items() if k != 'Background' and v > threshold}
@@ -372,7 +381,7 @@ class SpectrumPlotContainer:
                 avg_conf = sum(detected.values()) / len(detected)
                 self.metric_confidence_val.set_text(f"{avg_conf * 100:.1f}%")
                 self.metric_confidence_val.style('color: #059669;')
-                if self.service.mcu_iface.get_status():
+                if survey_active and self.service.mcu_iface.get_status():
                     self.service.mcu_iface.update_text(isotopes_text)
 
             else:
@@ -382,7 +391,7 @@ class SpectrumPlotContainer:
                 self.metric_isotopes_val.style('color: #374151;')
                 self.metric_confidence_val.set_text(f"{bg_conf * 100:.1f}%")
                 self.metric_confidence_val.style('color: #374151;')
-                if self.service.mcu_iface.get_status():
+                if survey_active and self.service.mcu_iface.get_status():
                     self.service.mcu_iface.update_text(isotopes_text)
         else:
             self.metric_isotopes_val.set_text(self.service.current_isotope_id)
