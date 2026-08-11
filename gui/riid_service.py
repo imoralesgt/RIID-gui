@@ -1213,99 +1213,123 @@ class RIIDCoreService:
         if not preset_ok:
             logger.warning("[BATCH_WORKER] Hardware timer preset could not be set - falling back to software-only timing (expect some overshoot past the target duration).")
         
-        for run_idx in range(self.batch_total_runs):
-            if self.state != 'BATCH_RECORDING': break
-            self.batch_current_run = run_idx + 1
-            logger.info(f"[BATCH_WORKER] Arranging sequence trace run [{self.batch_current_run}/{self.batch_total_runs}]...")
-            self.batch_status_text = f"Configuring run {self.batch_current_run} of {self.batch_total_runs}..."
-            self.batch_elapsed_seconds = 0
-            
-            # Reuses the already-programmed device handle (see push_active_profile_to_board) -
-            # no DPP parameters are resent here for each run in the batch.
-            if self.daq_device is None:
-                logger.error("[BATCH_WORKER] No programmed device handle available. Was the board ever probed/calibrated?")
-                self.batch_status_text = "Hardware error: Board not programmed"; break
-            
-            try:
-                await asyncio.to_thread(self._call_hw, self.daq_device.open)
-                await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
-                await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
-                await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
-            except Exception as e:
-                logger.error(f"[BATCH_WORKER] Hardware access dropped during sequence initiation step: {e}", exc_info=True)
-                self.batch_status_text = f"Hardware error: {e}"; break
-                
-            try:
-                while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
-                    await asyncio.sleep(1.0)
-                    if not self.verify_runtime_hardware_safety(): break
-                    batch_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
-                    self.batch_elapsed_seconds = int(batch_timers["tmr_c"] / 1000)
-                    self.batch_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
-                    self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
-                    
-                if self.state != 'BATCH_RECORDING':
-                    return
-                
-                # Stop acquisition immediately so the on-board timers/spectrum freeze at
-                # this exact moment. Without this, acquisition keeps running physically
-                # while we perform the final reads below, so the reported live/real time
-                # drifts well past the requested target the longer those reads take.
+        try:
+            for run_idx in range(self.batch_total_runs):
+                if self.state != 'BATCH_RECORDING': break
+                self.batch_current_run = run_idx + 1
+                logger.info(f"[BATCH_WORKER] Arranging sequence trace run [{self.batch_current_run}/{self.batch_total_runs}]...")
+                self.batch_status_text = f"Configuring run {self.batch_current_run} of {self.batch_total_runs}..."
+                self.batch_elapsed_seconds = 0
+
+                # Reuses the already-programmed device handle (see push_active_profile_to_board) -
+                # no DPP parameters are resent here for each run in the batch.
+                if self.daq_device is None:
+                    logger.error("[BATCH_WORKER] No programmed device handle available. Was the board ever probed/calibrated?")
+                    self.batch_status_text = "Hardware error: Board not programmed"; break
+
                 try:
-                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.open)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
                 except Exception as e:
-                    logger.error(f"[BATCH_WORKER] Failed to stop acquisition cleanly before final read: {e}", exc_info=True)
-                
-                final_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
-                
-                # Final timer read for the most accurate final live/real time values
-                # (used by both the .json and .spe metadata below). Safe to do now since
-                # acquisition is already stopped and the registers are no longer moving.
+                    logger.error(f"[BATCH_WORKER] Hardware access dropped during sequence initiation step: {e}", exc_info=True)
+                    self.batch_status_text = f"Hardware error: {e}"; break
+
                 try:
-                    final_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
-                except Exception:
-                    final_timers = {}
-                
-                final_live_ms = float(final_timers.get("tmr_c", self.batch_elapsed_seconds * 1000) or self.batch_elapsed_seconds * 1000)
-                final_real_ms = float(final_timers.get("tmr_a", final_live_ms) or final_live_ms)
-                final_live_s = final_live_ms / 1000.0
-                final_real_s = final_real_ms / 1000.0
-                
-                time_now = datetime.now(timezone.utc)
-                os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
-                file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
-                base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
-                spectrum_id = f"RUN_{run_idx}"
-                
-                # Single source of truth for both file formats below.
-                metadata = self._build_spectrum_metadata(
-                    num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s, real_time_s=final_real_s
-                )
-                
-                logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
-                with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
-                    json.dump({"id": spectrum_id, "metadata": metadata, "data": final_spectrum}, jf, indent=2)
-                
-                logger.info(f"[BATCH_WORKER] Committing spectrum array spe to root: {base_filepath}.spe")
-                self._write_spe_file(
-                    filepath_base=base_filepath, spectrum_id=spectrum_id, spectrum=final_spectrum,
-                    metadata=metadata, live_time_s=final_live_s, real_time_s=final_real_s, time_now=time_now
-                )
-            finally:
-                # Always stop acquisition (harmless/idempotent if the explicit stop
-                # above already ran) and close this run's connection, no matter how
-                # the block above exited: normal completion, an aborted run (state
-                # changed externally), or task cancellation via STOP - which throws
-                # CancelledError straight through the awaited sleep, bypassing
-                # everything else in this block including the explicit stop above.
-                # Without this, a cancelled batch run left the hardware physically
-                # running (and the serial connection open) indefinitely.
-                try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
-                except: pass
-                try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
-                except: pass
-                
-        self.set_state('IDLE'); self.batch_status_text = "Batch measurements finished successfully."
+                    while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
+                        await asyncio.sleep(1.0)
+                        if not self.verify_runtime_hardware_safety(): break
+                        batch_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
+                        self.batch_elapsed_seconds = int(batch_timers["tmr_c"] / 1000)
+                        self.batch_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
+                        self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
+
+                    if self.state != 'BATCH_RECORDING':
+                        return
+
+                    # Stop acquisition immediately so the on-board timers/spectrum freeze at
+                    # this exact moment. Without this, acquisition keeps running physically
+                    # while we perform the final reads below, so the reported live/real time
+                    # drifts well past the requested target the longer those reads take.
+                    try:
+                        await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                    except Exception as e:
+                        logger.error(f"[BATCH_WORKER] Failed to stop acquisition cleanly before final read: {e}", exc_info=True)
+
+                    final_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
+
+                    # Final timer read for the most accurate final live/real time values
+                    # (used by both the .json and .spe metadata below). Safe to do now since
+                    # acquisition is already stopped and the registers are no longer moving.
+                    try:
+                        final_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
+                    except Exception:
+                        final_timers = {}
+
+                    final_live_ms = float(final_timers.get("tmr_c", self.batch_elapsed_seconds * 1000) or self.batch_elapsed_seconds * 1000)
+                    final_real_ms = float(final_timers.get("tmr_a", final_live_ms) or final_live_ms)
+                    final_live_s = final_live_ms / 1000.0
+                    final_real_s = final_real_ms / 1000.0
+
+                    time_now = datetime.now(timezone.utc)
+                    os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
+                    file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
+                    base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
+                    spectrum_id = f"RUN_{run_idx}"
+
+                    # Single source of truth for both file formats below.
+                    metadata = self._build_spectrum_metadata(
+                        num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s, real_time_s=final_real_s
+                    )
+
+                    logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
+                    with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
+                        json.dump({"id": spectrum_id, "metadata": metadata, "data": final_spectrum}, jf, indent=2)
+
+                    logger.info(f"[BATCH_WORKER] Committing spectrum array spe to root: {base_filepath}.spe")
+                    self._write_spe_file(
+                        filepath_base=base_filepath, spectrum_id=spectrum_id, spectrum=final_spectrum,
+                        metadata=metadata, live_time_s=final_live_s, real_time_s=final_real_s, time_now=time_now
+                    )
+                finally:
+                    # Always stop acquisition (harmless/idempotent if the explicit stop
+                    # above already ran) and close this run's connection, no matter how
+                    # the block above exited: normal completion, an aborted run (state
+                    # changed externally), or task cancellation via STOP - which throws
+                    # CancelledError straight through the awaited sleep, bypassing
+                    # everything else in this block including the explicit stop above.
+                    # Without this, a cancelled batch run left the hardware physically
+                    # running (and the serial connection open) indefinitely.
+                    try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                    except: pass
+                    try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
+                    except: pass
+
+            self.set_state('IDLE'); self.batch_status_text = "Batch measurements finished successfully."
+        finally:
+            # Every run above resets the shared hardware live-time timer
+            # (timers_reset()), the same way _bg_recording_sequence's own
+            # session does - which breaks the RIID survey's STOP -> START
+            # "hardware timer persists" continuity assumption out from under
+            # it if a batch job runs in between. Mirrors that method's own
+            # finally block for exactly this reason, so every exit path here
+            # (normal completion, an aborted run, or STOP-triggered task
+            # cancellation) leaves things in a state the next survey session
+            # can trust:
+            #   1. Clear the stale self.live_spectrum left over from
+            #      whatever survey ran before this batch job - otherwise the
+            #      next survey START wrongly treats it as a prior
+            #      accumulation to "resume" (skipping its own timers_reset())
+            #      even though the hardware timer no longer matches it.
+            #   2. Raise the count-rate plot's x-axis offset to at least
+            #      whatever was last actually plotted, so the next
+            #      survey/background session - which starts counting from a
+            #      freshly-reset live-time of 0 - can never land BEHIND
+            #      already-plotted points and corrupt the line.
+            self.live_spectrum = []
+            if self.cps_history:
+                self._cps_history_time_offset_s = max(self._cps_history_time_offset_s, self.cps_history[-1][0])
 
     def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float, real_time_s: float) -> dict:
         """Assembles the full metadata block attached to a recorded spectrum. This is
