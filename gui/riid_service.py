@@ -506,11 +506,6 @@ class RIIDCoreService:
         self.current_isotope_id = "Recording Background..."
         self._main_loop_task = asyncio.create_task(self._bg_recording_sequence())
 
-        # Check whether the Arduino RPC bridge connection is valid before sending any update request
-        if self.mcu_iface.get_status():
-            # Valid status strings: 
-            self.mcu_iface.update_status(self.mcu_iface.loopback_status_idx('BKGND_REC'))
-
     async def _bg_recording_sequence(self):
         """Asynchronous worker for collecting background spectrum matrix arrays with accurate hardware live-time capture.
         Reuses the already-programmed device handle (see push_active_profile_to_board) -
