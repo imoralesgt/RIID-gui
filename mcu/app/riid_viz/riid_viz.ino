@@ -57,8 +57,8 @@ void loop() {
  * Updates the status LED based on the RIID status. 
  * 0: Idle -> Blue
  * 1: Recording background -> Red
- * 2: Surveying RIID (no result yet) -> Green
- * 3: Surveying RIID (result found) -> Acqua (Green + Blue)
+ * 2: Surveying RIID -> Green
+ * 3: Batch recording -> Acqua (Green + Blue)
  * 
  * Intended to be used with the `update_status_led` RPC call.
  * 

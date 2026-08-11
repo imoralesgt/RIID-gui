@@ -310,7 +310,7 @@ class RIIDCoreService:
         # Check whether the Arduino RPC bridge connection is valid before sending any update request
         if self.mcu_iface.get_status():
             # Valid status strings: "IDLE", "BG_RECORDING", "RIID_SURVEY", "BATCH_RECORDING"
-            self.mcu_iface.update_status(self.mcu_iface.loopback_status_idx(state_string))
+            self.mcu_iface.update_status(self.mcu_iface.lookup_state_idx(state_string))
 
     def reinitialize_daq_handle(self):
         """Destroys any stale driver reference and instantiates a fresh one, transmitting
