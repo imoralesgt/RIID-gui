@@ -4,6 +4,8 @@ A web-based graphical user interface for radioisotope identification (RIID) buil
 
 Source-level documentation (module/class/function reference, generated from docstrings) lives in [`gui/README.md`](gui/README.md) and `gui/docs/reference/`, kept in sync with `main` automatically — see [Generating the docs](#generating-the-docs) below to regenerate it locally.
 
+For provisioning (setting up) a new Arduino UNO Q from scratch (OS prerequisites, `uv`, cloning, flashing the MCU sketch, the WiFi mode daemon), see [`docs/provisioning.md`](docs/provisioning.md).
+
 ## Repository layout
 
 - `gui/` — the NiceGUI web application (this is what you run).

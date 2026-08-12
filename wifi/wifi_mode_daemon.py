@@ -3,16 +3,16 @@
 push-button over the Arduino RPC bridge and toggles the host's WiFi between
 Access Point and Station mode via NetworkManager.
 
-Runs directly on the host as root (see wifi/systemd/wifi-mode-switcher.service)
-- deliberately independent of gui/, which will later run inside a Docker
-container and shouldn't need host network privileges. This module vendors a
-trimmed copy of gui/mcu_interface.py's `_ArduinoBridge` RPC client rather than
-importing it, to keep that independence real rather than nominal.
+Runs directly on the host as root via wifi/systemd/wifi-mode-switcher.service,
+independent of gui/ (which runs in a Docker container without host network
+privileges). Vendors its own trimmed copy of gui/mcu_interface.py's
+`_ArduinoBridge` RPC client rather than importing it, so it has no dependency
+on the gui/ package.
 
-The MCU sketch (mcu/app/riid_viz/riid_viz.ino) does the actual button-hold
-timing/thresholding and reports back a simple "toggle requested" latch via the
-`poll_wifi_button` RPC method - this daemon just polls that once a second and
-reacts, it does no timing logic of its own.
+The MCU sketch (mcu/app/riid_viz/riid_viz.ino) tracks the button-hold
+duration itself and exposes a simple "toggle requested" latch via the
+`poll_wifi_button` RPC method; this daemon only polls that latch once a
+second and reacts to it.
 """
 
 import json
@@ -31,13 +31,9 @@ CONFIG_PATH = os.path.join(_WIFI_DIR, "config", "wifi_config.json")
 SWITCH_SCRIPT = os.path.join(_WIFI_DIR, "scripts", "switch_wifi_mode.sh")
 
 POLL_INTERVAL_S = 1.0
-# Long enough for a full scroll pass of the longest transient message
-# ("STA FAILED - AP MODE", ~28 chars incl. padding) at the matrix's default
-# scroll speed, plus comfortable margin for a human to notice the display
-# changed and focus on it before the window ends - 4s was too short to even
-# read "AP MODE"/"STA MODE" before it reverted to whatever text was showing
-# beforehand.
-TRANSIENT_TEXT_MS = 25000
+# Long enough for the longest transient message ("STA FAILED -> AP MODE") to
+# scroll fully across the matrix and stay legible before reverting.
+TRANSIENT_TEXT_MS = 20000
 AP_SSID_PREFIX = "IAEA_RIID_"
 
 WIFI_MODE_AP = 0
@@ -50,9 +46,8 @@ logger = logging.getLogger("wifi_mode_daemon")
 class _ArduinoBridge:
     """Minimal msgpack-rpc client for the Arduino_RouterBridge Unix socket.
 
-    Trimmed, standalone copy of gui/mcu_interface.py's `_ArduinoBridge` -
-    duplicated intentionally so this daemon has no import dependency on the
-    gui/ package, which will be containerized separately from this daemon.
+    A standalone copy of gui/mcu_interface.py's `_ArduinoBridge`, kept
+    separate so this daemon has no dependency on the gui/ package.
     """
 
     def __init__(self, socket_path=SOCKET_PATH):

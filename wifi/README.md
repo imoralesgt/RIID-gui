@@ -81,15 +81,22 @@ systemd rather than through a sudo operation shared with the GUI.
   (empty = open network), `max_sta_retries`.
 - `systemd/wifi-mode-switcher.service` — unit file template; see
   [Deployment](#deployment) below.
+- `pyproject.toml` / `uv.lock` — this directory's own standalone `uv`
+  project definition (just the `msgpack` dependency).
 
 ## Setup
 
-Requires Python 3 with the `msgpack` package (`pip install msgpack` — this
-directory is standalone, not part of the `gui`/`utils` `uv` workspace) and a
-Linux host running NetworkManager.
+Requires Python 3, [`uv`](https://docs.astral.sh/uv/), and a Linux host
+running NetworkManager. This directory is its own standalone `uv` project
+(a separate `pyproject.toml`/`uv.lock`, not part of the `gui`/`utils` `uv`
+workspace), with its own venv rather than using the system Python or
+gui/'s venv:
 
 ```bash
-cp wifi/config/wifi_config.json.example wifi/config/wifi_config.json
+cd wifi
+uv sync
+
+cp config/wifi_config.json.example config/wifi_config.json
 # then edit wifi_config.json: set sys_id, sta_ssid, sta_psk
 # (ap_psk already defaults to the shared RIID_IAEA - only override it if
 # this deployment needs a different AP passphrase)
@@ -121,8 +128,8 @@ step rather than something applied automatically:
 
 ```bash
 sudo cp wifi/systemd/wifi-mode-switcher.service /etc/systemd/system/
-# edit the unit's ExecStart path if this repo lives somewhere other than
-# /home/arduino/Gits/RIID-gui on the device
+# edit the unit's WorkingDirectory/ExecStart paths if this repo isn't at
+# /home/arduino/Gits/RIID-gui, or uv isn't installed under that user's home
 sudo systemctl daemon-reload
 sudo systemctl enable --now wifi-mode-switcher.service
 ```

@@ -6,7 +6,8 @@ Wants=NetworkManager.service
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/python3 /home/arduino/Gits/RIID-gui/wifi/wifi_mode_daemon.py
+WorkingDirectory=/home/arduino/Gits/RIID-gui/wifi
+ExecStart=/home/arduino/.local/bin/uv run --offline wifi_mode_daemon.py
 Restart=on-failure
 RestartSec=5
 
