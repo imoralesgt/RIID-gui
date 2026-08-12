@@ -2,8 +2,9 @@ import socket
 import msgpack
 import threading
 import time
+from config import logger
 
-class ArduinoBridge:
+class _ArduinoBridge:
     def __init__(self, socket_path="/var/run/arduino-router.sock"):
         self.socket_path = socket_path
         self.sock = None
@@ -24,7 +25,7 @@ class ArduinoBridge:
             
             return True
         except Exception as e:
-            print(f"Connection failed: {e}")
+            logger.error(f"Bridge could not be initialized. Connection failed: {e}")
             return False
     
     def call(self, method, *args, timeout=5):
@@ -77,7 +78,7 @@ class ArduinoBridge:
                     self._handle_response(msg)
             except Exception as e:
                 if self.running:
-                    print(f"Receive error: {e}")
+                    logger.error(f"Receive error: {e}")
                 break
     
     def _handle_response(self, msg):
@@ -95,28 +96,166 @@ class ArduinoBridge:
                 self.pending_responses[msgid]["result"] = result
                 self.pending_responses[msgid]["event"].set()
 
+class ArduinoInterface:
+
+    STATUS = {
+        0: "IDLE",
+        1: "BG_RECORDING",
+        2: "RIID_SURVEY",
+        3: "BATCH_RECORDING"
+    }
+
+    CHARS_SPECIAL = " +_-*/=."
+    CHARS_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    CHARS_NUMBERS = "0123456789"
+
+    RPC_UPDATE_STATUS_FUNC = "update_status_led"
+    RPC_UPDATE_TEXT_FUNC = "update_text_matrix"
+
+
+    def __init__(self):
+        self.bridge = _ArduinoBridge()
+        self.__bridge_status = False
+        if not self.bridge.connect():
+            logger.warning("Failed to connect to Arduino RPC router service. Onboard display will not be enabled.")
+        else:
+            self.__bridge_status = True
+            logger.info("Connected to Arduino RPC bridge.")
+
+    def lookup_state_idx(self, state_str : str) -> int:
+        """Reverse dictionary lookup to get the index of a status string
+        from the `STATUS` class property.
+
+        Args:
+            state_str (str): The status string to lookup
+
+        Returns:
+            int: The index of the status
+        """
+        return list(self.STATUS.values()).index(state_str)
+
+    def disconnect(self):
+        """Gracefully disconnects from the Arduino RPC router.
+        """
+        logger.info("Gracefully disconnecting from the Arduino RPC router...")
+        self.bridge.disconnect()
+
+    def get_status(self):
+        """
+        Returns the status of the RPC bridge, polled at the constructor.
+
+        Returns:
+            bool: The status of the RPC bridge
+        """
+        return self.__bridge_status
+
+    def update_status(self, status_index : int) -> None:
+        """Updates the status shown in the onboard RGB LED of the Arduino Q board.
+        Leverages the existing RPC router instance initialized in the class constructor.
+
+        The `STATUS` class property is used to map the status index to a human-readable logged string.
+        The sent value is a simple int-8 value, though.
+
+        Args:
+            status_index (int): The index of the status to be displayed
+
+        Returns:
+            None
+        """
+        if self.__bridge_status:
+            logger.info(f"Updating status in Arduino to {status_index}:{self.STATUS[status_index]}")
+            self.bridge.notify(self.RPC_UPDATE_STATUS_FUNC, status_index)
+        else:
+            logger.warning("Cannot update status, RPC router is not connected.")
+
+    def __sanitize_text(self, text : str) -> str:
+        """Sanitizes the provided string by removing non-existing characters.
+        Used to prevent the LED matrix from displaying invalid characters.
+        
+        Args:
+            text (str): The text to be sanitized
+
+        Returns:
+            str: The sanitized text
+        """
+
+        FALLBACK_CHAR = '_'
+        sanitized_text = ''
+
+        text = text.upper()
+        for char in text:
+            if (char not in self.CHARS_LETTERS) and (char not in self.CHARS_SPECIAL) and (char not in self.CHARS_NUMBERS):
+                sanitized_text += FALLBACK_CHAR
+            else:
+                sanitized_text += char
+
+        if text != sanitized_text:
+            logger.warning(f"Text contained invalid characters, sanitized to: {sanitized_text}")
+
+        return text
+
+    def update_text(self, text : str) -> None:
+        """Updates the text shown in the LED matrix of the Arduino Q board.
+        Sanitizes the string by removing non-existing characters. Leverages
+        the existing RPC router instance initialized in the class constructor.
+
+        Args:
+            text (str): The text to be displayed on the LED matrix
+
+        Returns:
+            None
+        """
+        if self.__bridge_status:
+            logger.info(f"Received text to update in Arduino: {text}")
+            sanitized_text = self.__sanitize_text(text)
+            self.bridge.notify(self.RPC_UPDATE_TEXT_FUNC, sanitized_text)
+        else:
+            logger.warning("Cannot update text, RPC router is not connected.")
+
+    def update_scroll_speed(self, speed : int) -> None:
+        """Updates the scroll speed shown in the LED matrix of the Arduino Q board.
+        Leverages the existing RPC router instance initialized in the class constructor.
+
+        Args:
+            speed (int): The scroll speed to be displayed on the LED matrix
+
+        Returns:
+            None
+        """
+        if self.__bridge_status:
+            logger.info(f"Received scroll speed to update in MCU LED matrix display: {speed}")
+            self.bridge.notify("update_scroll_speed", speed)
+        else:
+            logger.warning("Cannot update scroll speed, RPC router is not connected.")
+
+    def clear_text(self):
+        self.update_text("")
+
 def main():
-    bridge = ArduinoBridge()
-    
-    if not bridge.connect():
-        print("Failed to connect")
-        return
-    
-    print("Connected!")
-    
+    arduino_if = ArduinoInterface()
+
     for i in range(10):
-        state = i % 2 == 0
-        bridge.notify("set_led_state", state)
-        print(f"LED: {'ON' if state else 'OFF'}")
-        time.sleep(0.5)
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[0])
+        arduino_if.update_text("HELLO WORLD+TEST_&!INVALID CHAR")
+        arduino_if.update_scroll_speed(60);
+        time.sleep(15)
+
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[1])
+        arduino_if.update_text("Short text, no special chars")
+        arduino_if.update_scroll_speed(200);
+        time.sleep(15)
+
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[2])
+        arduino_if.update_text("Status - no RIID")
+        arduino_if.update_scroll_speed(40);
+        time.sleep(15)
+
+        arduino_if.update_status(list(arduino_if.STATUS.keys())[3])
+        arduino_if.clear_text()
+        time.sleep(15)
     
-    try:
-        value = bridge.call("read_temperature")
-        print(f"Sensor value: {value}")
-    except Exception as e:
-        print(f"Error: {e}")
-    
-    bridge.disconnect()
+    arduino_if.disconnect()
+
 
 if __name__ == "__main__":
     main()

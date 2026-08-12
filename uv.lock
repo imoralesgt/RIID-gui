@@ -690,6 +690,7 @@ version = "0.1.0"
 source = { editable = "gui" }
 dependencies = [
     { name = "ai-edge-litert" },
+    { name = "msgpack" },
     { name = "nicegui" },
     { name = "numpy" },
     { name = "python-api" },
@@ -709,6 +710,7 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "ai-edge-litert", specifier = ">=2.1.6" },
+    { name = "msgpack", specifier = ">=1.2.1" },
     { name = "nicegui", specifier = ">=3.14.0" },
     { name = "numpy", specifier = ">=2.5.0" },
     { name = "python-api", editable = "daq-core/NSIL-MCA-DPP4SiPM/sw/python-api" },

@@ -1,0 +1,16 @@
+default_profile: uno_q_profile
+
+profiles:
+  uno_q_profile:
+    fqbn: arduino:zephyr:unoq
+    platforms:
+      - platform: arduino:zephyr
+    port: /dev/ttyACM1
+    libraries:
+      - ArduinoGraphics (1.1.5)
+      - Arduino_RouterBridge (0.4.3)
+      - Arduino_RPClite (0.3.0)
+      - MsgPack (0.4.2)
+      - DebugLog (0.8.4)
+      - ArxTypeTraits (0.3.2)
+      - ArxContainer (0.7.0)

@@ -1,0 +1,5 @@
+# Copy to boards.txt (gitignored) and list one remote UNO Q hostname per
+# line for scripts/upload_fleet.sh. All boards share UNOQ_PASSWORD from
+# mcu/.env. Blank lines and lines starting with # are ignored.
+board-a.example-tailnet.ts.net
+board-b.example-tailnet.ts.net

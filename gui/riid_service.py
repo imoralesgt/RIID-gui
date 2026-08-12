@@ -23,6 +23,7 @@ from core.daq_commands import DaqCommands
 from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
 from ml_preprocessing import MLPreprocessing
+from mcu_interface import ArduinoInterface
 
 class RIIDCoreService:
     """Central hardware/service orchestration hub for the RIID station.
@@ -147,9 +148,14 @@ class RIIDCoreService:
         # docstring for why this needs to be a real threading.Lock, not
         # asyncio.Lock).
         self._hw_lock = threading.Lock()
-        
+
+        # Microcontroller visualization interface: leveraging Arduino Uno Q's
+        # RPC router. Must be constructed before the first set_state() call
+        # below, since set_state() dereferences self.mcu_iface.
+        self.mcu_iface = ArduinoInterface()
+
         # Operational State Flags
-        self.state = 'IDLE'
+        self.set_state('IDLE')
         self.is_hardware_available = False
         
         # Dynamic Spectrum Vector Storage Buffers
@@ -255,7 +261,7 @@ class RIIDCoreService:
         
         # Tracks whether the last survey was halted by the operator (STOP) while
         # holding valid spectrum data, so the plot can keep rendering it "frozen"
-        # instead of disappearing once the state leaves ACQUIRING_SURVEY.
+        # instead of disappearing once the state leaves RIID_SURVEY.
         self.survey_stopped_with_data = False
         
         # Set by clear_survey_data() while a survey is actively running; the
@@ -297,6 +303,15 @@ class RIIDCoreService:
         """
         with self._hw_lock:
             return func(*args, **kwargs)
+
+    def set_state(self, state_string : str) -> None:
+        self.state = state_string
+
+        # Check whether the Arduino RPC bridge connection is valid before sending any update request
+        if self.mcu_iface.get_status():
+            # Valid status strings: "IDLE", "BG_RECORDING", "RIID_SURVEY", "BATCH_RECORDING"
+            self.mcu_iface.update_status(self.mcu_iface.lookup_state_idx(state_string))
+            self.mcu_iface.update_text(state_string)
 
     def reinitialize_daq_handle(self):
         """Destroys any stale driver reference and instantiates a fresh one, transmitting
@@ -475,7 +490,19 @@ class RIIDCoreService:
         self.background_spectrum = []
         self.live_spectrum = []
         self.bg_target_time = target_time
-        self.state = 'BG_RECORDING'
+
+        # Starting a new background recording is always a hard break in the
+        # count-rate plot's timeline, never a continuation - whatever ran
+        # before (a survey the operator merely STOPped without CLEARing, a
+        # batch job, a prior background) is unconditionally wiped rather than
+        # bridged across via the x-axis time-offset, which only bridges
+        # cleanly when every intervening activity remembers to bank its own
+        # contribution into it. The hardware live-time timer gets the same
+        # fresh start via _bg_recording_sequence()'s own timers_reset() call,
+        # right after this, before acquisition begins.
+        self.clear_cps_history()
+
+        self.set_state('BG_RECORDING')
         self.current_isotope_id = "Recording Background..."
         self._main_loop_task = asyncio.create_task(self._bg_recording_sequence())
 
@@ -495,7 +522,7 @@ class RIIDCoreService:
         logger.info("[BACKGROUND_RUN] Async recording pipeline worker mounting...")
         if self.daq_device is None:
             logger.error("[BACKGROUND_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
-            self.status_text = "BG Error: Board not programmed"; self.state = 'IDLE'
+            self.status_text = "BG Error: Board not programmed"; self.set_state('IDLE')
             return
         
         # Give the board's own clock millisecond-precision control over when Timer C
@@ -562,7 +589,7 @@ class RIIDCoreService:
                 self.bg_progress = 1.0
                 self.status_text = "Background Spectrum Ready"
                 self.current_isotope_id = "BG Complete. Ready for Survey."
-                self.state = 'IDLE'
+                self.set_state('IDLE')
 
                 # Update ML model background
                 self.ml_inference.update_bkgnd_data(new_bkgnd_data=self.background_spectrum, new_bkgnd_live_time=self.bg_accumulated_seconds)
@@ -570,7 +597,7 @@ class RIIDCoreService:
                 logger.info(f"[BACKGROUND_RUN] Background spectrum saved. Pure HW Live-Time: {self.bg_hardware_live_time_ms} ms")
         except Exception as e:
             logger.error(f"[BACKGROUND_RUN] Pipeline error: {e}", exc_info=True)
-            self.status_text = f"BG Error: {e}"; self.state = 'IDLE'; self.bg_progress = 0.0
+            self.status_text = f"BG Error: {e}"; self.set_state('IDLE'); self.bg_progress = 0.0
         finally:
             # Runs on every exit path - normal completion, an error above, or an
             # aborted run (STOP pressed mid-BG, hardware lost, task cancelled).
@@ -619,7 +646,7 @@ class RIIDCoreService:
         if self.state != 'IDLE': return
         
         self.survey_stopped_with_data = False
-        self.state = 'ACQUIRING_SURVEY'
+        self.set_state('RIID_SURVEY')
         self.current_isotope_id = "Resuming Accumulation..." if self.live_spectrum else "Accumulating Counts..."
         self._main_loop_task = asyncio.create_task(self._continuous_survey_sequence())
 
@@ -653,7 +680,7 @@ class RIIDCoreService:
         logger.info("[SURVEY_RUN] Shared master API channel activated for live collection.")
         if self.daq_device is None:
             logger.error("[SURVEY_RUN] No programmed device handle available. Was the board ever probed/calibrated?")
-            self.status_text = "Survey Error: Board not programmed"; self.state = 'IDLE'
+            self.status_text = "Survey Error: Board not programmed"; self.set_state('IDLE')
             return
         try:
             await asyncio.to_thread(self._call_hw, self.daq_device.open)
@@ -709,7 +736,7 @@ class RIIDCoreService:
                 self._prev_survey_elapsed_s = 0.0
             self._prev_survey_counts = sum(previous_spectrum) if previous_spectrum else 0
             
-            while self.state == 'ACQUIRING_SURVEY':
+            while self.state == 'RIID_SURVEY':
                 await asyncio.sleep(1.0)
                 if not self.verify_runtime_hardware_safety():
                     break
@@ -869,7 +896,7 @@ class RIIDCoreService:
                     
         except Exception as e:
             logger.error(f"[HARDWARE] Continuous survey thread encountered an exception: {e}", exc_info=True)
-            self.status_text = f"Survey Error: {e}"; self.state = 'IDLE'
+            self.status_text = f"Survey Error: {e}"; self.set_state('IDLE')
         finally:
             # Must live in `finally`, not right after the while loop, so it also
             # runs on task cancellation - normal loop exit, an error above, OR
@@ -1173,7 +1200,7 @@ class RIIDCoreService:
         logger.warning(f"[DAQ_ACTION] Operator triggered automated multi-run batch recording -> runs={total_runs}")
         if self.state != 'IDLE': return
         self.batch_target_time = target_time; self.batch_total_runs = total_runs; self.batch_prefix = prefix
-        self.state = 'BATCH_RECORDING'
+        self.set_state('BATCH_RECORDING')
         self._main_loop_task = asyncio.create_task(self._batch_recording_worker_loop())
 
     async def _batch_recording_worker_loop(self):
@@ -1193,99 +1220,123 @@ class RIIDCoreService:
         if not preset_ok:
             logger.warning("[BATCH_WORKER] Hardware timer preset could not be set - falling back to software-only timing (expect some overshoot past the target duration).")
         
-        for run_idx in range(self.batch_total_runs):
-            if self.state != 'BATCH_RECORDING': break
-            self.batch_current_run = run_idx + 1
-            logger.info(f"[BATCH_WORKER] Arranging sequence trace run [{self.batch_current_run}/{self.batch_total_runs}]...")
-            self.batch_status_text = f"Configuring run {self.batch_current_run} of {self.batch_total_runs}..."
-            self.batch_elapsed_seconds = 0
-            
-            # Reuses the already-programmed device handle (see push_active_profile_to_board) -
-            # no DPP parameters are resent here for each run in the batch.
-            if self.daq_device is None:
-                logger.error("[BATCH_WORKER] No programmed device handle available. Was the board ever probed/calibrated?")
-                self.batch_status_text = "Hardware error: Board not programmed"; break
-            
-            try:
-                await asyncio.to_thread(self._call_hw, self.daq_device.open)
-                await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
-                await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
-                await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
-            except Exception as e:
-                logger.error(f"[BATCH_WORKER] Hardware access dropped during sequence initiation step: {e}", exc_info=True)
-                self.batch_status_text = f"Hardware error: {e}"; break
-                
-            try:
-                while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
-                    await asyncio.sleep(1.0)
-                    if not self.verify_runtime_hardware_safety(): break
-                    batch_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
-                    self.batch_elapsed_seconds = int(batch_timers["tmr_c"] / 1000)
-                    self.batch_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
-                    self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
-                    
-                if self.state != 'BATCH_RECORDING':
-                    return
-                
-                # Stop acquisition immediately so the on-board timers/spectrum freeze at
-                # this exact moment. Without this, acquisition keeps running physically
-                # while we perform the final reads below, so the reported live/real time
-                # drifts well past the requested target the longer those reads take.
+        try:
+            for run_idx in range(self.batch_total_runs):
+                if self.state != 'BATCH_RECORDING': break
+                self.batch_current_run = run_idx + 1
+                logger.info(f"[BATCH_WORKER] Arranging sequence trace run [{self.batch_current_run}/{self.batch_total_runs}]...")
+                self.batch_status_text = f"Configuring run {self.batch_current_run} of {self.batch_total_runs}..."
+                self.batch_elapsed_seconds = 0
+
+                # Reuses the already-programmed device handle (see push_active_profile_to_board) -
+                # no DPP parameters are resent here for each run in the batch.
+                if self.daq_device is None:
+                    logger.error("[BATCH_WORKER] No programmed device handle available. Was the board ever probed/calibrated?")
+                    self.batch_status_text = "Hardware error: Board not programmed"; break
+
                 try:
-                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.open)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.clear_spectrum)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.timers_reset)
+                    await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_start)
                 except Exception as e:
-                    logger.error(f"[BATCH_WORKER] Failed to stop acquisition cleanly before final read: {e}", exc_info=True)
-                
-                final_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
-                
-                # Final timer read for the most accurate final live/real time values
-                # (used by both the .json and .spe metadata below). Safe to do now since
-                # acquisition is already stopped and the registers are no longer moving.
+                    logger.error(f"[BATCH_WORKER] Hardware access dropped during sequence initiation step: {e}", exc_info=True)
+                    self.batch_status_text = f"Hardware error: {e}"; break
+
                 try:
-                    final_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
-                except Exception:
-                    final_timers = {}
-                
-                final_live_ms = float(final_timers.get("tmr_c", self.batch_elapsed_seconds * 1000) or self.batch_elapsed_seconds * 1000)
-                final_real_ms = float(final_timers.get("tmr_a", final_live_ms) or final_live_ms)
-                final_live_s = final_live_ms / 1000.0
-                final_real_s = final_real_ms / 1000.0
-                
-                time_now = datetime.now(timezone.utc)
-                os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
-                file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
-                base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
-                spectrum_id = f"RUN_{run_idx}"
-                
-                # Single source of truth for both file formats below.
-                metadata = self._build_spectrum_metadata(
-                    num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s, real_time_s=final_real_s
-                )
-                
-                logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
-                with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
-                    json.dump({"id": spectrum_id, "metadata": metadata, "data": final_spectrum}, jf, indent=2)
-                
-                logger.info(f"[BATCH_WORKER] Committing spectrum array spe to root: {base_filepath}.spe")
-                self._write_spe_file(
-                    filepath_base=base_filepath, spectrum_id=spectrum_id, spectrum=final_spectrum,
-                    metadata=metadata, live_time_s=final_live_s, real_time_s=final_real_s, time_now=time_now
-                )
-            finally:
-                # Always stop acquisition (harmless/idempotent if the explicit stop
-                # above already ran) and close this run's connection, no matter how
-                # the block above exited: normal completion, an aborted run (state
-                # changed externally), or task cancellation via STOP - which throws
-                # CancelledError straight through the awaited sleep, bypassing
-                # everything else in this block including the explicit stop above.
-                # Without this, a cancelled batch run left the hardware physically
-                # running (and the serial connection open) indefinitely.
-                try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
-                except: pass
-                try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
-                except: pass
-                
-        self.state = 'IDLE'; self.batch_status_text = "Batch measurements finished successfully."
+                    while self.batch_elapsed_seconds < self.batch_target_time and self.state == 'BATCH_RECORDING':
+                        await asyncio.sleep(1.0)
+                        if not self.verify_runtime_hardware_safety(): break
+                        batch_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
+                        self.batch_elapsed_seconds = int(batch_timers["tmr_c"] / 1000)
+                        self.batch_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
+                        self.batch_status_text = f"Run [{self.batch_current_run}/{self.batch_total_runs}] -> Live-Time: {self.batch_elapsed_seconds}/{self.batch_target_time}s"
+
+                    if self.state != 'BATCH_RECORDING':
+                        return
+
+                    # Stop acquisition immediately so the on-board timers/spectrum freeze at
+                    # this exact moment. Without this, acquisition keeps running physically
+                    # while we perform the final reads below, so the reported live/real time
+                    # drifts well past the requested target the longer those reads take.
+                    try:
+                        await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                    except Exception as e:
+                        logger.error(f"[BATCH_WORKER] Failed to stop acquisition cleanly before final read: {e}", exc_info=True)
+
+                    final_spectrum = await asyncio.to_thread(self._call_hw, self.daq_device.read_spectrum)
+
+                    # Final timer read for the most accurate final live/real time values
+                    # (used by both the .json and .spe metadata below). Safe to do now since
+                    # acquisition is already stopped and the registers are no longer moving.
+                    try:
+                        final_timers = await asyncio.to_thread(self._call_hw, self.daq_device.timers_read)
+                    except Exception:
+                        final_timers = {}
+
+                    final_live_ms = float(final_timers.get("tmr_c", self.batch_elapsed_seconds * 1000) or self.batch_elapsed_seconds * 1000)
+                    final_real_ms = float(final_timers.get("tmr_a", final_live_ms) or final_live_ms)
+                    final_live_s = final_live_ms / 1000.0
+                    final_real_s = final_real_ms / 1000.0
+
+                    time_now = datetime.now(timezone.utc)
+                    os.makedirs(self.OUTPUT_FOLDER, exist_ok=True)
+                    file_stamp = time_now.strftime("%Y%m%d_%H%M%S")
+                    base_filepath = os.path.join(self.OUTPUT_FOLDER, f"{file_stamp}_{self.system.serial_number}_{self.batch_prefix}_run{run_idx:04d}")
+                    spectrum_id = f"RUN_{run_idx}"
+
+                    # Single source of truth for both file formats below.
+                    metadata = self._build_spectrum_metadata(
+                        num_channels=len(final_spectrum), run_idx=run_idx, live_time_s=final_live_s, real_time_s=final_real_s
+                    )
+
+                    logger.info(f"[BATCH_WORKER] Committing spectrum array json to root: {base_filepath}.json")
+                    with open(f"{base_filepath}.json", "w", encoding="utf-8") as jf:
+                        json.dump({"id": spectrum_id, "metadata": metadata, "data": final_spectrum}, jf, indent=2)
+
+                    logger.info(f"[BATCH_WORKER] Committing spectrum array spe to root: {base_filepath}.spe")
+                    self._write_spe_file(
+                        filepath_base=base_filepath, spectrum_id=spectrum_id, spectrum=final_spectrum,
+                        metadata=metadata, live_time_s=final_live_s, real_time_s=final_real_s, time_now=time_now
+                    )
+                finally:
+                    # Always stop acquisition (harmless/idempotent if the explicit stop
+                    # above already ran) and close this run's connection, no matter how
+                    # the block above exited: normal completion, an aborted run (state
+                    # changed externally), or task cancellation via STOP - which throws
+                    # CancelledError straight through the awaited sleep, bypassing
+                    # everything else in this block including the explicit stop above.
+                    # Without this, a cancelled batch run left the hardware physically
+                    # running (and the serial connection open) indefinitely.
+                    try: await asyncio.to_thread(self._call_hw, self.daq_device.data_acquisition_stop)
+                    except: pass
+                    try: await asyncio.to_thread(self._call_hw, self.daq_device.close)
+                    except: pass
+
+            self.set_state('IDLE'); self.batch_status_text = "Batch measurements finished successfully."
+        finally:
+            # Every run above resets the shared hardware live-time timer
+            # (timers_reset()), the same way _bg_recording_sequence's own
+            # session does - which breaks the RIID survey's STOP -> START
+            # "hardware timer persists" continuity assumption out from under
+            # it if a batch job runs in between. Mirrors that method's own
+            # finally block for exactly this reason, so every exit path here
+            # (normal completion, an aborted run, or STOP-triggered task
+            # cancellation) leaves things in a state the next survey session
+            # can trust:
+            #   1. Clear the stale self.live_spectrum left over from
+            #      whatever survey ran before this batch job - otherwise the
+            #      next survey START wrongly treats it as a prior
+            #      accumulation to "resume" (skipping its own timers_reset())
+            #      even though the hardware timer no longer matches it.
+            #   2. Raise the count-rate plot's x-axis offset to at least
+            #      whatever was last actually plotted, so the next
+            #      survey/background session - which starts counting from a
+            #      freshly-reset live-time of 0 - can never land BEHIND
+            #      already-plotted points and corrupt the line.
+            self.live_spectrum = []
+            if self.cps_history:
+                self._cps_history_time_offset_s = max(self._cps_history_time_offset_s, self.cps_history[-1][0])
 
     def _build_spectrum_metadata(self, num_channels: int, run_idx: int, live_time_s: float, real_time_s: float) -> dict:
         """Assembles the full metadata block attached to a recorded spectrum. This is
@@ -1821,9 +1872,9 @@ class RIIDCoreService:
         The last spectrum trace and identification result are left exactly as they were
         so the operator can still review what was captured before pressing STOP."""
         logger.warning(f"[SERVICE] Operator pressed STOP button. Halting acquisition out of state: {self.state}")
-        was_survey = self.state == 'ACQUIRING_SURVEY'
+        was_survey = self.state == 'RIID_SURVEY'
         
-        self.state = 'IDLE'
+        self.set_state('IDLE')
         self.batch_status_text = "Halted by Operator"
         
         if was_survey:
@@ -1846,7 +1897,7 @@ class RIIDCoreService:
         conflicting batch run or changing DAQ/calibration settings mid-survey
         (either of which could crash the hardware or corrupt the current
         measurement)."""
-        return self.state in ('ACQUIRING_SURVEY', 'BG_RECORDING')
+        return self.state in ('RIID_SURVEY', 'BG_RECORDING')
 
     @property
     def is_batch_recording_active(self) -> bool:
@@ -1864,14 +1915,14 @@ class RIIDCoreService:
         latter case the running acquisition loop performs the hardware-level reset
         on its next tick and keeps surveying, so STOP is not required first.
         The background spectrum profile is intentionally left untouched."""
-        if self.state not in ('IDLE', 'ACQUIRING_SURVEY'):
+        if self.state not in ('IDLE', 'RIID_SURVEY'):
             logger.warning(f"[SERVICE] CLEAR request rejected. Core state is busy: {self.state}")
             return
         
         logger.warning("[SERVICE] Operator pressed CLEAR button. Wiping accumulated survey spectrum (background spectrum preserved).")
         self._last_logged_detection = None
         
-        if self.state == 'ACQUIRING_SURVEY':
+        if self.state == 'RIID_SURVEY':
             # Let the active acquisition loop perform the actual hardware-level clear
             # on its own next tick rather than tearing down and rebuilding the survey.
             self.clear_requested = True
@@ -1906,7 +1957,7 @@ class RIIDCoreService:
         """Validates live connectivity during active data collection runs. Auto-halts on failure."""
         if not self.is_hardware_available:
             logger.critical("[ACQUISITION_GUARD] Live physical device connection lost mid-run! Intercepting crash...")
-            self.state = 'IDLE'
+            self.set_state('IDLE')
             self.status_text = "CRITICAL: Device Disconnected Mid-Run"
             self.batch_status_text = "CRITICAL: Run aborted due to hardware loss."
             self.current_isotope_id = "Hardware Lost"

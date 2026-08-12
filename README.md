@@ -8,6 +8,7 @@ Source-level documentation (module/class/function reference, generated from docs
 
 - `gui/` — the NiceGUI web application (this is what you run).
 - `daq-core/NSIL-MCA-DPP4SiPM/` — git submodule containing the DAQ board firmware/hardware sources and its `python-api` communications package, which the GUI depends on to talk to the board.
+- `mcu/` — Arduino UNO Q sketch driving the RIID system's onboard RGB LED and LED matrix as a physical status display, remote-controlled by the GUI over RPC. See [`mcu/README.md`](mcu/README.md).
 - `deprecated-ml-core/` — **DEPRECATED**, not a `uv` workspace member. Historical record of the RIID model R&D: preprocessing/inference prototypes, the Keras→TFLite conversion notebook, an early Arduino Uno Q deployment target, and real-hardware validation spectra. See [Machine learning model (RIID)](#machine-learning-model-riid) below.
 - `utils/spectrum_recorder/` — standalone spectrum recording utility/library.
 
@@ -28,7 +29,7 @@ git submodule update --init --recursive
 
 ## Running the GUI
 
-This project uses [uv](https://docs.astral.sh/uv/) to manage the Python workspace (`gui`, `utils/spectrum_recorder`, and the DAQ `python-api` submodule are workspace members sharing one lockfile; `deprecated-ml-core/` is standalone and not part of it). Requires Python 3.12+.
+This project uses [uv](https://docs.astral.sh/uv/) to manage the Python workspace (`gui`, `utils/spectrum_recorder`, and the DAQ `python-api` submodule are workspace members sharing one lockfile; `deprecated-ml-core/` is standalone and not part of it). `mcu/` is standalone too, keeping an Arduino sketch with its own `arduino-cli`-based build/upload flow, unrelated to this `uv` workspace (see [`mcu/README.md`](mcu/README.md)). Requires Python 3.12+.
 
 Install dependencies from the repository root:
 
@@ -43,7 +44,9 @@ cd gui
 uv run main.py
 ```
 
-The server starts on **http://localhost:8080**. Open that URL in a browser to access the station interface. On startup, the backend automatically probes for a connected DAQ board over USB/serial; the GUI remains usable (with a clear "hardware disconnected" banner) even if no board is attached.
+The server starts on **http://localhost:8080**. Open that URL in a browser to access the RIID system's interface. On startup, the backend automatically probes for a connected DAQ board over USB/serial; the GUI remains usable (with a clear "hardware disconnected" banner) even if no board is attached.
+
+The GUI also drives a physical RGB LED + LED matrix status display on an Arduino UNO Q board, if one is present — this is a separate, optional component with its own one-time flashing step (see [`mcu/README.md`](mcu/README.md)), not something `uv sync`/`uv run` sets up. The GUI works normally without it; see [Physical status display](#physical-status-display-arduino-uno-q) below.
 
 ## GUI features
 
@@ -77,7 +80,7 @@ Batch/multi-run spectrum acquisition with experiment metadata:
 
 ### Spectra Download
 
-Bulk file management for everything the station has written to disk, organized into three categories — Background, Batch, and RIID — each with select-all, multi-file download, and permanent delete (with confirmation).
+Bulk file management for everything the RIID system has written to disk, organized into three categories — Background, Batch, and RIID — each with select-all, multi-file download, and permanent delete (with confirmation).
 
 ![Spectra Download tab: RIID category file listing with select-all, download, and delete controls](docs/res/spectra_download.png)
 
@@ -89,6 +92,15 @@ Bulk file management for everything the station has written to disk, organized i
 - **Commit** — persists the profile (keyed by the board's serial number) and pushes the DPP parameters down to the physical board.
 
 ![Hardware & Calibration tab: instrument identity, energy calibration coefficients, and advanced MCA/DPP settings](docs/res/hardware_calibration.png)
+
+### Physical status display (Arduino UNO Q)
+
+Alongside the browser UI, the RIID system drives an onboard RGB LED and 12x8 LED matrix on an Arduino UNO Q board as a physical status display, visible without a screen nearby:
+
+- **RGB LED** — colored by the RIID system's current state: blue (idle), red (recording background), green (RIID survey in progress), purple (batch recording).
+- **LED matrix** — scrolls the current state name, and during an active survey, scrolls the live detected isotope(s) (or "Background") instead.
+
+This is optional hardware: it's driven over an RPC bridge (`gui/mcu_interface.py`) to a separate sketch that must be flashed onto the board once (see [`mcu/README.md`](mcu/README.md) for the firmware, RPC protocol, and the color/state mapping). If the board isn't attached or the bridge isn't reachable, the GUI detects this and simply skips these updates — every other feature works normally.
 
 ## Machine learning model (RIID)
 
@@ -168,6 +180,10 @@ uv sync --group docs
 PYTHONPATH=. uv run --group docs lazydocs \
   --output-path docs/reference \
   --src-base-url "https://github.com/imoralesgt/RIID-gui/blob/main/" \
-  config main riid_service state_engine ml_inference ml_preprocessing \
+  config main riid_service state_engine ml_inference ml_preprocessing mcu_interface \
   view_spectrum_id view_recording view_download view_calibration
 ```
+
+## License
+
+[BSD 2-Clause](LICENSE).

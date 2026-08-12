@@ -6,7 +6,7 @@
             "type": "shell",
             "command": "arduino-cli compile --fqbn arduino:zephyr:unoq .",
             "options": {
-                "cwd": "${workspaceFolder}/app/rpc_test"
+                "cwd": "${workspaceFolder}/app/riid_viz"
             },
             "group": "build",
             "problemMatcher": ["$gcc"]
@@ -14,9 +14,9 @@
         {
             "label": "Fast deploy and run",
             "type": "shell",
-            "command": "arduino-cli upload --fqbn arduino:zephyr:unoq --port /dev/ttyACM0 .",
+            "command": "${workspaceFolder}/scripts/upload.sh .",
             "options": {
-                "cwd": "${workspaceFolder}/app/rpc_test"
+                "cwd": "${workspaceFolder}/app/riid_viz"
             },
             "dependsOn": ["Compile Arduino MCU Sketch"],
             "group": {
