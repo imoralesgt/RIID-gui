@@ -79,6 +79,13 @@ and the DAQ `python-api` submodule).
 
 ## 5. Flash the MCU sketch
 
+> **Run this step on your development computer, not on the UNO Q itself.**
+> The commands below assume `arduino-cli` and the `arduino:zephyr` core
+> installed on your computer, with the board connected over USB. Compiling
+> on the UNO Q's own Linux side is not supported: its installed core version
+> can differ from what's tested here, producing a build that compiles
+> without errors but isn't equivalent to the one this guide verifies against.
+
 ```bash
 cd mcu
 ./scripts/upload.sh app/riid_viz
@@ -102,52 +109,14 @@ pin on the JDIGITAL header - see
 
 ```bash
 cd ~/Gits/RIID-gui/wifi
-uv sync
-
-cp config/wifi_config.json.example config/wifi_config.json
+sudo ./setup.sh
 ```
 
-Edit `config/wifi_config.json` and set:
-
-- `sys_id` — this system's identifier (e.g. `"SYS06"`), used to build the
-  Access Point SSID (`IAEA_RIID_SYS06`).
-- `sta_ssid` — the SSID of the network this system should connect to in station mode (e.g. `"SEIB-GUEST"`).
-- `sta_psk` — the network's WPA2 passphrase (in Station mode), or `""` (empty string) if the network is open/passwordless.
-
-Leave `ap_psk` and `max_sta_retries` at their defaults (`"RIID_IAEA"` and
-`3`) unless this deployment specifically needs different values.
-
-Scope passwordless `sudo` to the switch script:
-
-```bash
-sudo visudo -f /etc/sudoers.d/riid-wifi
-```
-
-Add this line, replacing `arduino` with the actual username if different,
-and the path with wherever the repository was cloned in step 3 if not
-`~/Gits/RIID-gui`:
-
-```
-arduino ALL=(root) NOPASSWD: /home/arduino/Gits/RIID-gui/wifi/scripts/switch_wifi_mode.sh
-```
-
-If the repository was cloned somewhere other than `~/Gits/RIID-gui`, or if
-`uv` was installed under a different user's home directory, open
-`systemd/wifi-mode-switcher.service` and update its `WorkingDirectory` and
-`ExecStart` lines accordingly, for example:
-
-```
-WorkingDirectory=/home/arduino/Gits/RIID-gui/wifi
-ExecStart=/home/arduino/.local/bin/uv run --offline wifi_mode_daemon.py
-```
-
-Install and start the systemd service:
-
-```bash
-sudo cp systemd/wifi-mode-switcher.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wifi-mode-switcher.service
-```
+Prompts for the system ID, the Station network SSID/passphrase, and the
+Access Point passphrase (defaults to the shared `RIID_IAEA`), then writes
+`config/wifi_config.json`, runs `uv sync`, installs the sudoers rule and
+systemd service (both automatically pointed at this checkout), and starts
+the daemon.
 
 Verify:
 
@@ -155,8 +124,10 @@ Verify:
 systemctl status wifi-mode-switcher.service
 ```
 
-See [`wifi/README.md`](../wifi/README.md) for the full daemon behavior
-(open vs. WPA2-PSK Station networks, retry/fallback, LED/matrix indicators).
+See [`wifi/README.md`](../wifi/README.md) for the equivalent steps done by
+hand (useful if `setup.sh` doesn't fit a given deployment) and the full
+daemon behavior (open vs. WPA2-PSK Station networks, retry/fallback,
+LED/matrix indicators).
 
 ## 8. Run the GUI
 

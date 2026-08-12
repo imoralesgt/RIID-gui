@@ -80,9 +80,10 @@ systemd rather than through a sudo operation shared with the GUI.
   `ap_psk` (defaults to the shared `RIID_IAEA`), `sta_ssid`, `sta_psk`
   (empty = open network), `max_sta_retries`.
 - `systemd/wifi-mode-switcher.service` — unit file template; see
-  [Deployment](#deployment) below.
+  [Manual setup](#manual-setup) below.
 - `pyproject.toml` / `uv.lock` — this directory's own standalone `uv`
   project definition (just the `msgpack` dependency).
+- `setup.sh` — interactive setup script; see [Setup](#setup) below.
 
 ## Setup
 
@@ -90,25 +91,51 @@ Requires Python 3, [`uv`](https://docs.astral.sh/uv/), and a Linux host
 running NetworkManager. This directory is its own standalone `uv` project
 (a separate `pyproject.toml`/`uv.lock`, not part of the `gui`/`utils` `uv`
 workspace), with its own venv rather than using the system Python or
-gui/'s venv:
+gui/'s venv.
+
+```bash
+cd wifi
+sudo ./setup.sh
+```
+
+Prompts for the system ID, the Station network SSID/passphrase, and the
+Access Point passphrase (defaults to the shared `RIID_IAEA`), then writes
+`config/wifi_config.json`, runs `uv sync` as the invoking user (not root,
+so the resulting `.venv` stays owned by that user), installs the
+`/etc/sudoers.d/riid-wifi` rule and the `wifi-mode-switcher.service` unit
+with paths pointed at this checkout, and starts the daemon. Re-running it
+is safe: existing config values are offered as defaults, and the service
+is reinstalled/restarted with the new values.
+
+### Manual setup
+
+Equivalent to what `setup.sh` does, run by hand:
 
 ```bash
 cd wifi
 uv sync
 
 cp config/wifi_config.json.example config/wifi_config.json
-# then edit wifi_config.json: set sys_id, sta_ssid, sta_psk
-# (ap_psk already defaults to the shared RIID_IAEA - only override it if
-# this deployment needs a different AP passphrase)
 ```
+
+Edit `config/wifi_config.json` and set:
+
+- `sys_id` — this system's identifier (e.g. `"SYS06"`), used to build the
+  Access Point SSID (`IAEA_RIID_SYS06`).
+- `sta_ssid` — the SSID of the network this system should connect to in
+  Station mode (e.g. `"SEIB-GUEST"`).
+- `sta_psk` — that network's WPA2 passphrase, or `""` (empty string) if the
+  network is open/passwordless.
+
+Leave `ap_psk` and `max_sta_retries` at their defaults (`"RIID_IAEA"` and
+`3`) unless this deployment specifically needs different values.
 
 `scripts/switch_wifi_mode.sh` requires root (it writes into
 `/etc/NetworkManager/system-connections/`). In production this is a
-non-issue — the daemon itself runs as root via systemd (see
-[Deployment](#deployment) below) — but for manually invoking or testing the
-script outside the daemon (e.g. interactively as a non-root user), scope a
-passwordless `sudo` rule to exactly that one script rather than granting
-broader access:
+non-issue — the daemon itself runs as root via systemd — but for manually
+invoking or testing the script outside the daemon (e.g. interactively as a
+non-root user), scope a passwordless `sudo` rule to exactly that one script
+rather than granting broader access:
 
 ```bash
 sudo visudo -f /etc/sudoers.d/riid-wifi
@@ -121,15 +148,22 @@ then save and exit:
 <user> ALL=(root) NOPASSWD: /path/to/RIID-gui/wifi/scripts/switch_wifi_mode.sh
 ```
 
-## Deployment
-
-This is a host-level, system-wide change, so it's a manual provisioning
-step rather than something applied automatically:
+Install and start the systemd service - this is a host-level, system-wide
+change, so it's a manual step rather than something `uv sync` applies
+automatically:
 
 ```bash
 sudo cp wifi/systemd/wifi-mode-switcher.service /etc/systemd/system/
-# edit the unit's WorkingDirectory/ExecStart paths if this repo isn't at
-# /home/arduino/Gits/RIID-gui, or uv isn't installed under that user's home
 sudo systemctl daemon-reload
 sudo systemctl enable --now wifi-mode-switcher.service
+```
+
+If the repository was cloned somewhere other than `~/Gits/RIID-gui`, or if
+`uv` was installed under a different user's home directory, edit the
+installed unit's `WorkingDirectory` and `ExecStart` lines to match before
+running the commands above, for example:
+
+```
+WorkingDirectory=/home/arduino/Gits/RIID-gui/wifi
+ExecStart=/home/arduino/.local/bin/uv run --offline wifi_mode_daemon.py
 ```

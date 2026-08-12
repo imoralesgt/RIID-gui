@@ -59,6 +59,11 @@ Verify with `arduino-cli core list` / `arduino-cli lib list`. If `sketch.yaml` i
 
 ## Building & uploading
 
+Run these from your development computer, with the board connected over
+USB - not on the UNO Q's own Linux side. Its installed `arduino:zephyr`
+core version can differ from the one installed above, producing a build
+that compiles without errors but isn't equivalent to the tested one.
+
 Single board, from within `app/riid_viz` (or pass a sketch directory as `$1`):
 
 ```bash
