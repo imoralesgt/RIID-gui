@@ -14,6 +14,14 @@ The UNO Q has two processors on one board: a Linux-capable MPU (where `gui/` run
 
 The status index/color mapping mirrors `gui/mcu_interface.py`'s own `ArduinoInterface.STATUS` dict one-for-one — if either side's mapping ever changes, the other must be updated to match. On the GUI side, `RIIDCoreService.set_state()` (`gui/riid_service.py`) is the single place that pushes both the LED color and the matrix's state text together, exactly once per state transition; see [`gui/README.md`](../gui/README.md#mcu-integration-arduino-uno-q) for how the rest of the integration (live RIID detection text during a survey, etc.) is wired up on the GUI side.
 
+Three more RPC methods drive the WiFi AP/Station mode indicator — a second, physically distinct RGB LED ("LED3") and an external push-button (D13/PB13, wired to GND; see [`wifi/README.md`](../wifi/README.md) for wiring). Unlike the three above, these are **not** called by the GUI at all: they're consumed by the standalone [`wifi/wifi_mode_daemon.py`](../wifi/README.md), which connects to the same RPC socket independently so that WiFi/NetworkManager switching stays out of the (future-containerized) GUI process entirely.
+
+| RPC method | Called from | Effect |
+|---|---|---|
+| `poll_wifi_button()` | `wifi/wifi_mode_daemon.py` | Read-clears request/response call: returns whether the WiFi-mode push-button was held for 5s+ since the last poll. The MCU does all the hold-duration surveying itself; the caller just reacts to a `true` result. |
+| `update_wifi_led(mode: int)` | `wifi/wifi_mode_daemon.py` | Sets LED3 to match the current WiFi mode: `0`=Access Point (red), `1`=Station (white) |
+| `show_transient_text(text: str, duration_ms: int)` | `wifi/wifi_mode_daemon.py` | Flashes `text` on the LED matrix for `duration_ms`, then automatically reverts to whatever text was showing beforehand (e.g. the current RIID status) — lets the WiFi daemon show a one-shot `AP MODE`/`STA MODE` message without needing to know or restore the GUI's own status text |
+
 This is a separate, active component from the early Arduino Uno Q **inference** target under `ml-core/` (`inference.py`/`mcu.cpp`) — that one ran RIID classification on-device over serial and has been superseded by the GUI's own `ml_inference.py` pipeline, and is no longer used in production (see the root [README](../README.md#machine-learning-model-riid)). This sketch only renders status/text; it does no classification.
 
 ## Layout

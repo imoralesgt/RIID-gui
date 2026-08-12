@@ -9,6 +9,7 @@ Source-level documentation (module/class/function reference, generated from docs
 - `gui/` — the NiceGUI web application (this is what you run).
 - `daq-core/NSIL-MCA-DPP4SiPM/` — git submodule containing the DAQ board firmware/hardware sources and its `python-api` communications package, which the GUI depends on to talk to the board.
 - `mcu/` — Arduino UNO Q sketch driving the RIID system's onboard RGB LED and LED matrix as a physical status display, remote-controlled by the GUI over RPC. See [`mcu/README.md`](mcu/README.md).
+- `wifi/` — standalone daemon that toggles the system's WiFi between Access Point and Station mode on a long push-button hold, independent of `gui/`. See [`wifi/README.md`](wifi/README.md).
 - `deprecated-ml-core/` — **DEPRECATED**, not a `uv` workspace member. Historical record of the RIID model R&D: preprocessing/inference prototypes, the Keras→TFLite conversion notebook, an early Arduino Uno Q deployment target, and real-hardware validation spectra. See [Machine learning model (RIID)](#machine-learning-model-riid) below.
 - `utils/spectrum_recorder/` — standalone spectrum recording utility/library.
 
@@ -46,7 +47,7 @@ uv run main.py
 
 The server starts on **http://localhost:8080**. Open that URL in a browser to access the RIID system's interface. On startup, the backend automatically probes for a connected DAQ board over USB/serial; the GUI remains usable (with a clear "hardware disconnected" banner) even if no board is attached.
 
-The GUI also drives a physical RGB LED + LED matrix status display on an Arduino UNO Q board, if one is present — this is a separate, optional component with its own one-time flashing step (see [`mcu/README.md`](mcu/README.md)), not something `uv sync`/`uv run` sets up. The GUI works normally without it; see [Physical status display](#physical-status-display-arduino-uno-q) below.
+The RIID system's onboard computer is an Arduino UNO Q board: its Linux domain (MPU) is where `gui/` and the WiFi mode daemon run, and the microcontroller domain (MCU) drives a physical RGB LED + LED matrix status display over an internal RPC bridge — see [Physical status display](#physical-status-display-arduino-uno-q) below. The MCU side needs its own one-time sketch flash (see [`mcu/README.md`](mcu/README.md)), not something `uv sync`/`uv run` sets up; if that sketch hasn't been flashed yet (e.g. during development on a different machine, before first provisioning), the GUI detects the RPC bridge is unreachable and simply skips those updates rather than failing.
 
 ## GUI features
 
@@ -95,12 +96,38 @@ Bulk file management for everything the RIID system has written to disk, organiz
 
 ### Physical status display (Arduino UNO Q)
 
-Alongside the browser UI, the RIID system drives an onboard RGB LED and 12x8 LED matrix on an Arduino UNO Q board as a physical status display, visible without a screen nearby:
+Alongside the browser UI, the RIID system's Arduino UNO Q drives two onboard RGB LEDs and a 12x8 LED matrix as a physical status display, visible without a screen nearby. Both indicators are driven from the Linux side (where `gui/` and the WiFi daemon run) over an internal RPC bridge to a sketch on the microcontroller (MCU) side, which needs a one-time flash (see [`mcu/README.md`](mcu/README.md) for the firmware and full RPC protocol). If that sketch isn't flashed yet or the bridge is otherwise unreachable, the relevant software simply skips these updates rather than failing — useful during development, but not the expected state of a provisioned system.
 
-- **RGB LED** — colored by the RIID system's current state: blue (idle), red (recording background), green (RIID survey in progress), purple (batch recording).
-- **LED matrix** — scrolls the current state name, and during an active survey, scrolls the live detected isotope(s) (or "Background") instead.
+#### LED4 — RIID operating status
 
-This is optional hardware: it's driven over an RPC bridge (`gui/mcu_interface.py`) to a separate sketch that must be flashed onto the board once (see [`mcu/README.md`](mcu/README.md) for the firmware, RPC protocol, and the color/state mapping). If the board isn't attached or the bridge isn't reachable, the GUI detects this and simply skips these updates — every other feature works normally.
+Driven by the GUI (`gui/mcu_interface.py`) over `RIIDCoreService.set_state()`, colored by the system's current acquisition state:
+
+| State | Color |
+|---|---|
+| Idle | Blue |
+| Recording background | Red |
+| RIID survey in progress | Green |
+| Batch recording | Purple (red + blue) |
+
+#### LED3 — WiFi mode
+
+Driven independently by the standalone WiFi daemon (see [`wifi/README.md`](wifi/README.md) — this is unrelated to the GUI and keeps working even if the GUI isn't running):
+
+| Mode | Color |
+|---|---|
+| Station (connected to a predefined network) | White |
+| Access Point (broadcasting `IAEA_RIID_<sys_id>`) | Red |
+
+#### LED matrix
+
+A single scrolling text display shared by both subsystems above:
+
+- **RIID status** (from the GUI): scrolls the current state name, and during an active survey, the live detected isotope(s) (or "Background") instead.
+- **WiFi mode** (from the WiFi daemon): shows for a brief moment a message on every mode change — `AP MODE`, `STA MODE: <ssid>` (the connected network's name), or `STA FAILED -> AP MODE` if a Station connection couldn't be established — then automatically reverts to whatever the GUI last set, without either subsystem needing to know about the other.
+
+#### Switching between AP and Station mode
+
+A small momentary push-button, wired between pin `D13` and `GND` on the JDIGITAL header (see [`wifi/README.md`](wifi/README.md#hardware-wiring-the-button) for wiring details), toggles the WiFi mode: **holding it down for 5+ seconds** switches the system between connecting to a predefined Station network and broadcasting its own Access Point. Every system boots into Station mode by default; if the Station connection repeatedly fails, it automatically falls back to Access Point mode instead (visibly, via the "STA FAILED" matrix message above). This whole feature — button, LED3, and the AP/Station switch itself — is handled entirely by a standalone daemon, independent of the GUI (see [`wifi/README.md`](wifi/README.md)).
 
 ## Machine learning model (RIID)
 

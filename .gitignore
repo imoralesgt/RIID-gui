@@ -214,6 +214,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# RIID wifi mode switcher - real config with the site's Station SSID/passphrase
+wifi/config/wifi_config.json
+
 # Streamlit
 .streamlit/secrets.toml
 .claude
