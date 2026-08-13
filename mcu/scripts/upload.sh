@@ -10,12 +10,13 @@
 set -euo pipefail
 
 FQBN="${FQBN:-arduino:zephyr:unoq}"
-SKETCH_DIR="${1:-.}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/_common.sh"
 load_env "$SCRIPT_DIR"
+
+SKETCH_DIR="${1:-$SCRIPT_DIR/../app/riid_viz}"
 
 USB_PORT="$(arduino-cli board list --json | python3 -c "
 import json, sys

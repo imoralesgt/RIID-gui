@@ -1,0 +1,15 @@
+[connection]
+id=riid-sta
+uuid={{UUID}}
+type=wifi
+autoconnect=false
+
+[wifi]
+mode=infrastructure
+ssid={{SSID}}
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=ignore

@@ -1,0 +1,15 @@
+[Unit]
+Description=RIID WiFi AP/Station mode switcher (push-button triggered)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/arduino/Gits/RIID-gui/wifi
+ExecStart=/home/arduino/.local/bin/uv run --offline wifi_mode_daemon.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

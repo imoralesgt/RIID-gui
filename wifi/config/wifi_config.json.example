@@ -1,0 +1,7 @@
+{
+  "sys_id": "SYSXX",
+  "ap_psk": "RIID_IAEA",
+  "sta_ssid": "SEIB-GUEST",
+  "sta_psk": "",
+  "max_sta_retries": 3
+}
