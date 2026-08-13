@@ -42,10 +42,11 @@ This is a separate, active component from the early Arduino Uno Q **inference** 
 
 Requires [`arduino-cli`](https://arduino.github.io/arduino-cli/). `_common.sh`'s `resolve_flash_artifacts` invokes `arduino-cli compile --fqbn arduino:zephyr:unoq` directly (not `--profile`), so it builds against whatever core/libraries are installed globally in your `arduino-cli` environment (`~/.arduino15`), not an isolated per-profile environment — `app/riid_viz/sketch.yaml` documents the exact versions to install, but doesn't install them for you.
 
-Install the `arduino:zephyr` core (provides the UNO Q's FQBN, `arduino:zephyr:unoq`) and the libraries listed in `sketch.yaml`:
+Install the `arduino:zephyr` core (provides the UNO Q's FQBN, `arduino:zephyr:unoq`) and the libraries listed in `sketch.yaml`. Update both indexes before installing the core - `core install` pulls in `Arduino_RouterBridge` and the rest as bundled library dependencies, which fails with a "Library not found" error if the library index hasn't been fetched yet:
 
 ```bash
 arduino-cli core update-index
+arduino-cli lib update-index
 arduino-cli core install arduino:zephyr
 
 arduino-cli lib install \
@@ -60,6 +61,36 @@ arduino-cli lib install \
 
 Verify with `arduino-cli core list` / `arduino-cli lib list`. If `sketch.yaml` is ever bumped to newer library versions, re-run the `lib install` command with the updated version pins to keep your environment in sync.
 
+### Windows-specific setup
+
+Verified working via [Git for Windows](https://git-scm.com/download/win)'s
+bundled `bash.exe`, without WSL. Run all commands below, and the
+`upload.sh` command in the next section, from a Git Bash shell - these are
+bash scripts and won't run under PowerShell or `cmd.exe`.
+
+`arduino-cli` isn't available through `winget`. Install it with the
+official install script, which also runs fine under Git Bash:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh -o /tmp/arduino_install.sh
+sh /tmp/arduino_install.sh
+```
+
+This installs to `~/.local/bin`, which Git Bash already puts on `PATH`.
+
+`upload.sh` also shells out to `python3` to parse `arduino-cli board list`'s
+JSON output. Windows has no real Python installed by default - `python3`
+and `python` on a stock `PATH` resolve to non-functional Microsoft Store
+alias stubs. Install a real Python (e.g. `winget install Python.Python.3.12`),
+then add a `python3` shim, since the python.org installer only creates a
+`python.exe`, not `python3.exe`:
+
+```bash
+mkdir -p ~/.local/bin
+printf '#!/bin/bash\nexec python "$@"\n' > ~/.local/bin/python3
+chmod +x ~/.local/bin/python3
+```
+
 ## Building & uploading
 
 Run these from your development computer, with the board connected over
@@ -67,15 +98,21 @@ USB - not on the UNO Q's own Linux side. Its installed `arduino:zephyr`
 core version can differ from the one installed above, producing a build
 that compiles without errors but isn't equivalent to the tested one.
 
-These build/upload scripts have only been run on Linux so far. They're
-plain bash and should work under WSL on Windows or natively on macOS, but
-neither has actually been tried - if you hit something platform-specific,
-that's expected territory, not a regression.
+`upload.sh` has been verified on both Linux and Windows (Git Bash, no WSL
+- see [Windows-specific setup](#windows-specific-setup) above), both over
+direct USB and over its SSH/network fallback. `upload_fleet.sh` and
+`upload_prebuilt.sh` (which only ever use SSH/network) share the same
+underlying `resolve_flash_artifacts`/`remoteocd` mechanism already
+verified through `upload.sh`'s SSH path on both OSes, but the two scripts
+themselves haven't been run directly on either one. Neither script has
+been tried on macOS - they're plain bash and should work the same way
+there, but that's expected, untested territory, not a
+regression, if you hit something platform-specific.
 
-Single board, from within `app/riid_viz` (or pass a sketch directory as `$1`):
+Single board, from anywhere in the repo (or pass a sketch directory as `$1`):
 
 ```bash
-../../scripts/upload.sh .
+scripts/upload.sh
 ```
 
 Fleet upload to every host in `boards.txt` (copy `boards.txt.example` and `.env.example` first):

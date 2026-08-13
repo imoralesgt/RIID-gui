@@ -2,7 +2,10 @@
 
 Step-by-step setup for a fresh Arduino UNO Q running its stock Debian Linux
 image, with a shell already reachable (SSH, ADB, or a physical console) as
-the board's default user (`arduino`).
+the board's default user (`arduino`). Every step runs on the board's own
+Debian Linux shell regardless of what your own computer runs, except
+[step 5](#5-flash-the-mcu-sketch), which runs on your development computer
+and has separate Linux/macOS and Windows instructions.
 
 Internet access on the board is required to complete this setup (installing
 `uv`, cloning the repository, and resolving Python/Arduino dependencies all
@@ -80,16 +83,38 @@ and the DAQ `python-api` submodule).
 ## 5. Flash the MCU sketch
 
 > **Run this step on your development computer, not on the UNO Q itself.**
-> The commands below assume `arduino-cli` and the `arduino:zephyr` core
-> installed on your computer, with the board connected over USB. Compiling
-> on the UNO Q's own Linux side is not supported: its installed core version
-> can differ from what's tested here, producing a build that compiles
-> without errors but isn't equivalent to the one this guide verifies against.
+> Compiling on the UNO Q's own Linux side is not supported: its installed
+> core version can differ from what's tested here, producing a build that
+> compiles without errors but isn't equivalent to the one this guide
+> verifies against.
+
+### Linux / macOS
+
+Assumes `arduino-cli` and the `arduino:zephyr` core are already installed
+on your computer - see
+[`mcu/README.md`](../mcu/README.md#installing-the-arduino-core--libraries)
+if not, with the board connected over USB:
 
 ```bash
 cd mcu
 ./scripts/upload.sh app/riid_viz
 ```
+
+### Windows
+
+Verified via [Git for Windows](https://git-scm.com/download/win)'s bundled
+`bash.exe`, without WSL - run every command below from a Git Bash shell,
+not PowerShell or `cmd.exe`. Install `arduino-cli`, the `arduino:zephyr`
+core, and the `python3` shim `upload.sh` depends on first - see
+[`mcu/README.md`](../mcu/README.md#windows-specific-setup) - then, with the
+board connected over USB:
+
+```bash
+cd mcu
+./scripts/upload.sh app/riid_viz
+```
+
+### After flashing
 
 Drives LED4, LED3, and the LED matrix. See [`mcu/README.md`](../mcu/README.md)
 for the firmware/RPC details.
@@ -97,7 +122,9 @@ for the firmware/RPC details.
 For batch-provisioning multiple RIID systems, `scripts/upload_fleet.sh`
 compiles the sketch once and uploads it over SSH to every host listed in
 `boards.txt` (copy `boards.txt.example` and `.env.example` first) - see
-[`mcu/README.md`](../mcu/README.md#layout) for setup.
+[`mcu/README.md`](../mcu/README.md#layout) for setup. This has only been
+verified on Linux so far; it should work the same way under Windows Git
+Bash or on macOS, but neither has actually been tried.
 
 ## 6. Wire the external WiFi mode button
 
@@ -136,13 +163,24 @@ cd ~/Gits/RIID-gui/gui
 uv run main.py
 ```
 
-Open **http://localhost:8080**.
+The GUI listens on all network interfaces, port 8080 - not just
+`localhost`. The board itself typically has no monitor/keyboard/mouse
+attached in the field, so access it from a browser on another device on
+the same network (lab computer, laptop, tablet) instead. Find the board's
+IP address:
+
+```bash
+hostname -I
+```
+
+Then open `http://<board-ip>:8080` (or `http://<tailscale-hostname>:8080`
+if reachable over Tailscale) from that other device.
 
 ## 9. Verify the full system
 
-- GUI loads at http://localhost:8080 (shows a "hardware disconnected"
-  banner if no DAQ board is attached yet - the rest of the interface still
-  works).
+- GUI loads at `http://<board-ip>:8080` from another device on the network
+  (shows a "hardware disconnected" banner if no DAQ board is attached yet -
+  the rest of the interface still works).
 - The LED matrix scrolls status text; LED4 reflects the GUI's current state
   (blue/red/green/purple).
 - LED3 shows white (Station mode, the default) or red (AP mode).
