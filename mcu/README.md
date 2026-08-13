@@ -100,12 +100,12 @@ that compiles without errors but isn't equivalent to the tested one.
 
 `upload.sh` has been verified on both Linux and Windows (Git Bash, no WSL
 - see [Windows-specific setup](#windows-specific-setup) above), both over
-direct USB and over its SSH/network fallback. `upload_fleet.sh` and
-`upload_prebuilt.sh` (which only ever use SSH/network) share the same
-underlying `resolve_flash_artifacts`/`remoteocd` mechanism already
-verified through `upload.sh`'s SSH path on both OSes, but the two scripts
-themselves haven't been run directly on either one. Neither script has
-been tried on macOS - they're plain bash and should work the same way
+direct USB and over its SSH/network fallback. `upload_fleet.sh` has also
+been verified on Windows. `upload_prebuilt.sh` shares the same underlying
+`resolve_flash_artifacts`/`remoteocd` mechanism already verified through
+the scripts above on both OSes, but hasn't been run directly on either
+one. Neither script has been tried on macOS - they're plain bash and
+should work the same way
 there, but that's expected, untested territory, not a
 regression, if you hit something platform-specific.
 
