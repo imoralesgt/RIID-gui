@@ -30,7 +30,10 @@ This is a separate, active component from the early Arduino Uno Q **inference** 
 - `app/riid_viz/sketch.yaml` — `arduino-cli` build profile (FQBN `arduino:zephyr:unoq`, port, pinned library versions).
 - `scripts/upload.sh [sketch-dir]` — compiles and uploads to a single board: direct USB/serial if the board is found on a serial port, otherwise falls back to an SSH/network upload (needs `UNOQ_HOST`, and usually `UNOQ_PASSWORD`, from `.env`).
 - `scripts/upload_fleet.sh [sketch-dir]` — compiles once and uploads the same build to every board listed in `boards.txt`, over SSH, for provisioning multiple RIID systems at once.
-- `scripts/_common.sh` — shared helpers (env loading, artifact/tool path resolution) sourced by both upload scripts.
+- `scripts/build_prebuilt.sh [sketch-dir]` — compiles and copies the result into `prebuilt/`, for anyone who wants to flash without installing this sketch's libraries or the `arduino:zephyr` core's full toolchain locally.
+- `scripts/upload_prebuilt.sh [binary-file]` — uploads an already-built binary (defaults to the tracked `prebuilt/riid_viz.elf-zsk.bin`) over SSH/network, without compiling.
+- `prebuilt/riid_viz.elf-zsk.bin` — tracked, ready-to-flash build of the current sketch; see [Using a pre-built binary](#using-a-pre-built-binary) below.
+- `scripts/_common.sh` — shared helpers (env loading, artifact/tool path resolution) sourced by the upload scripts.
 - `boards.txt` / `boards.txt.example` — one remote board hostname per line, for `upload_fleet.sh`. Gitignored; copy the example to get started.
 - `.env` / `.env.example` — `UNOQ_HOST` / `UNOQ_PASSWORD` for the SSH/network upload path. Gitignored; copy the example to get started.
 - `.vscode/tasks.json` — VS Code build/upload tasks ("Compile Arduino MCU Sketch", "Fast deploy and run") wired to run from `app/riid_viz`.
@@ -64,6 +67,11 @@ USB - not on the UNO Q's own Linux side. Its installed `arduino:zephyr`
 core version can differ from the one installed above, producing a build
 that compiles without errors but isn't equivalent to the tested one.
 
+These build/upload scripts have only been run on Linux so far. They're
+plain bash and should work under WSL on Windows or natively on macOS, but
+neither has actually been tried - if you hit something platform-specific,
+that's expected territory, not a regression.
+
 Single board, from within `app/riid_viz` (or pass a sketch directory as `$1`):
 
 ```bash
@@ -77,3 +85,28 @@ scripts/upload_fleet.sh
 ```
 
 Both scripts default to compiling `app/riid_viz` when no sketch directory is given, so they can be run from anywhere in the repo.
+
+## Using a pre-built binary
+
+`prebuilt/riid_viz.elf-zsk.bin` is a tracked, ready-to-flash build of the
+current sketch, for flashing a board without installing this sketch's
+libraries or the full `arduino:zephyr` core toolchain - only `arduino-cli`
+and the core itself (for its board/tool definitions) are needed, not the
+library set from [Installing the Arduino core & libraries](#installing-the-arduino-core--libraries)
+above.
+
+```bash
+scripts/upload_prebuilt.sh
+```
+
+This always uploads over SSH/network (needs `UNOQ_HOST`, and usually
+`UNOQ_PASSWORD`, from `.env` - same as `upload_fleet.sh`); there isn't
+currently a reliable direct-USB path for uploading a pre-built binary
+without compiling, so use `scripts/upload.sh` instead if the board is only
+reachable over USB.
+
+After changing the sketch, regenerate the tracked binary and commit it:
+
+```bash
+scripts/build_prebuilt.sh
+```
