@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""Standalone daemon: polls the RIID system's externally-wired WiFi-mode
-push-button over the Arduino RPC bridge and toggles the host's WiFi between
-Access Point and Station mode via NetworkManager.
+"""Standalone daemon: switches the RIID system's onboard WiFi between Access
+Point and Station mode. Controlled primarily via a local Unix socket (the
+GUI's Network Setup card) and secondarily via an MCU-wired jumper cable, as
+an advanced/manual fallback.
 
-Runs directly on the host as root via wifi/systemd/wifi-mode-switcher.service,
-independent of gui/ (which runs in a Docker container without host network
-privileges). Vendors its own trimmed copy of gui/mcu_interface.py's
-`_ArduinoBridge` RPC client rather than importing it, so it has no dependency
-on the gui/ package.
-
-The MCU sketch (mcu/app/riid_viz/riid_viz.ino) tracks the button-hold
-duration itself and exposes a simple "toggle requested" latch via the
-`poll_wifi_button` RPC method; this daemon only polls that latch once a
-second and reacts to it.
+Runs as root via wifi/systemd/wifi-mode-switcher.service, independent of
+gui/ (meant to run in a Docker container without host network/root
+privileges) - vendors its own trimmed `_ArduinoBridge` RPC client rather
+than importing gui/mcu_interface.py's.
 """
 
 import json
@@ -26,6 +21,7 @@ import time
 import msgpack
 
 SOCKET_PATH = "/var/run/arduino-router.sock"
+GUI_SOCKET_PATH = "/var/run/riid-wifi.sock"
 _WIFI_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(_WIFI_DIR, "config", "wifi_config.json")
 SWITCH_SCRIPT = os.path.join(_WIFI_DIR, "scripts", "switch_wifi_mode.sh")
@@ -34,7 +30,6 @@ POLL_INTERVAL_S = 1.0
 # Long enough for the longest transient message ("STA FAILED -> AP MODE") to
 # scroll fully across the matrix and stay legible before reverting.
 TRANSIENT_TEXT_MS = 20000
-AP_SSID_PREFIX = "IAEA_RIID_"
 
 WIFI_MODE_AP = 0
 WIFI_MODE_STA = 1
@@ -125,26 +120,89 @@ class _ArduinoBridge:
                 self.pending_responses[msgid]["event"].set()
 
 
+class GuiSocketServer:
+    """Local Unix-socket RPC server for the GUI's Network Setup card.
+
+    Same msgpack-rpc framing as the Arduino bridge above. Only channel
+    through which the GUI affects WiFi state - it never shells out to
+    nmcli/systemctl/sudo itself, only asks this already-root daemon to.
+    """
+
+    def __init__(self, daemon, socket_path=GUI_SOCKET_PATH):
+        self.daemon = daemon
+        self.socket_path = socket_path
+        self.methods = {
+            "get_state": daemon.handle_get_state,
+            "scan_networks": daemon.handle_scan_networks,
+            "apply_config": daemon.handle_apply_config,
+        }
+
+    def start(self):
+        if os.path.exists(self.socket_path):
+            os.remove(self.socket_path)
+        server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server_sock.bind(self.socket_path)
+        # World-writable, matching /var/run/arduino-router.sock's own mode -
+        # both are local trusted IPC channels reachable by the GUI's
+        # (potentially containerized, non-root) user.
+        os.chmod(self.socket_path, 0o666)
+        server_sock.listen(4)
+        logger.info("GUI socket listening at %s", self.socket_path)
+        threading.Thread(target=self._accept_loop, args=(server_sock,), daemon=True).start()
+
+    def _accept_loop(self, server_sock):
+        while True:
+            conn, _ = server_sock.accept()
+            threading.Thread(target=self._handle_connection, args=(conn,), daemon=True).start()
+
+    def _handle_connection(self, conn):
+        unpacker = msgpack.Unpacker(raw=False)
+        try:
+            while True:
+                data = conn.recv(4096)
+                if not data:
+                    break
+                unpacker.feed(data)
+                for msg in unpacker:
+                    self._handle_message(conn, msg)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    def _handle_message(self, conn, msg):
+        if not isinstance(msg, list) or len(msg) < 4 or msg[0] != 0:
+            return
+        _, msgid, method, args = msg
+        handler = self.methods.get(method)
+        try:
+            if handler is None:
+                raise ValueError(f"Unknown method: {method}")
+            result = handler(*args)
+            error = None
+        except Exception as e:
+            logger.error("GUI request '%s' failed: %s", method, e)
+            result = None
+            error = str(e)
+        conn.sendall(msgpack.packb([1, msgid, error, result]))
+
+
 def load_config():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
-    config.setdefault("max_sta_retries", 3)
+    config.setdefault("mode", "ap")
+    config.setdefault("ap_ssid", "IAEA_RIID_SYSXX")
     config.setdefault("ap_psk", "RIID_IAEA")
+    config.setdefault("sta_ssid", "")
+    config.setdefault("sta_psk", "")
+    config.setdefault("known_networks", [])
+    config.setdefault("max_sta_retries", 3)
     return config
 
 
-def active_connection_id():
-    """Returns whichever of 'riid-ap'/'riid-sta' NetworkManager currently
-    reports as active, or None if neither is."""
-    result = subprocess.run(
-        ["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"],
-        capture_output=True, text=True, check=True,
-    )
-    active_names = result.stdout.splitlines()
-    for name in ("riid-ap", "riid-sta"):
-        if name in active_names:
-            return name
-    return None
+def save_config(config):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
 
 
 def run_switch_script(mode, ssid, psk=None):
@@ -161,7 +219,10 @@ class WifiModeDaemon:
     def __init__(self):
         self.config = load_config()
         self.bridge = _ArduinoBridge()
-        self.mode = WIFI_MODE_STA
+        self.mode = WIFI_MODE_AP
+        self.lock = threading.Lock()
+        self.last_switch_ok = True
+        self.last_switch_fell_back = False
 
     def connect_bridge(self):
         while True:
@@ -172,9 +233,6 @@ class WifiModeDaemon:
             except OSError as e:
                 logger.warning("Arduino RPC bridge not reachable yet (%s); retrying in 5s", e)
                 time.sleep(5)
-
-    def ap_ssid(self):
-        return f"{AP_SSID_PREFIX}{self.config['sys_id']}"
 
     def push_led(self, mode):
         try:
@@ -189,20 +247,21 @@ class WifiModeDaemon:
             logger.warning("Could not update LED matrix: %s", e)
 
     def switch_to_ap(self, announce=True):
-        logger.info("Switching to Access Point mode (%s)", self.ap_ssid())
-        run_switch_script("ap", self.ap_ssid(), self.config["ap_psk"])
+        logger.info("Switching to Access Point mode (%s)", self.config["ap_ssid"])
+        ok = run_switch_script("ap", self.config["ap_ssid"], self.config["ap_psk"])
         self.mode = WIFI_MODE_AP
         self.push_led(WIFI_MODE_AP)
         if announce:
             self.push_transient_text("AP MODE")
+        return ok
 
     def switch_to_station(self, announce=True):
         ssid = self.config["sta_ssid"]
         psk = self.config["sta_psk"]
         if not ssid:
-            logger.warning("No Station SSID configured in wifi_config.json; staying in AP mode.")
+            logger.warning("No Station network selected in wifi_config.json; staying in AP mode.")
             self.switch_to_ap()
-            return
+            return False
 
         max_retries = self.config["max_sta_retries"]
         for attempt in range(1, max_retries + 1):
@@ -212,39 +271,98 @@ class WifiModeDaemon:
                 self.push_led(WIFI_MODE_STA)
                 if announce:
                     self.push_transient_text(f"STA MODE: {ssid}")
-                return
+                return True
 
         logger.warning("Station connection failed after %d attempts; falling back to AP mode.", max_retries)
         self.switch_to_ap(announce=False)
         self.push_transient_text("STA FAILED -> AP MODE")
+        return False
 
     def toggle(self):
-        if self.mode == WIFI_MODE_STA:
-            self.switch_to_ap()
-        else:
-            self.switch_to_station()
+        """Advanced/manual path: flips mode on a jumper-cable hold, reported
+        by the MCU via `poll_wifi_button`."""
+        with self.lock:
+            if self.mode == WIFI_MODE_STA:
+                ok = self.switch_to_ap()
+                fell_back = False
+            else:
+                ok = self.switch_to_station()
+                fell_back = not ok
+            self.last_switch_ok = ok
+            self.last_switch_fell_back = fell_back
 
     def sync_boot_state(self):
-        """Boots into Station mode by default; only stays in AP mode if it's
-        already the NetworkManager-active connection from a prior run."""
-        active = active_connection_id()
-        if active == "riid-ap":
-            self.mode = WIFI_MODE_AP
-            self.push_led(WIFI_MODE_AP)
-        else:
+        """Applies the mode configured in wifi_config.json (default AP) at startup."""
+        if self.config.get("mode", "ap") == "sta":
             self.switch_to_station(announce=False)
+        else:
+            self.switch_to_ap(announce=False)
+
+    def handle_get_state(self):
+        with self.lock:
+            return {
+                "mode": "sta" if self.mode == WIFI_MODE_STA else "ap",
+                "ap_ssid": self.config["ap_ssid"],
+                "ap_psk": self.config["ap_psk"],
+                "known_networks": self.config["known_networks"],
+                "active_sta_ssid": self.config["sta_ssid"],
+                "last_switch_ok": self.last_switch_ok,
+                "last_switch_fell_back": self.last_switch_fell_back,
+            }
+
+    def handle_scan_networks(self):
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "SSID,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
+            capture_output=True, text=True, check=True, timeout=20,
+        )
+        seen = set()
+        networks = []
+        for line in result.stdout.splitlines():
+            # nmcli -t escapes literal colons within a field as "\:"; SSID is
+            # the first field, SECURITY (possibly containing "\:") the rest.
+            ssid, sep, security = line.partition(":")
+            security = security.replace("\\:", ":")
+            if not sep or not ssid or ssid in seen:
+                continue
+            seen.add(ssid)
+            networks.append({"ssid": ssid, "secured": security not in ("", "--")})
+        return networks
+
+    def handle_apply_config(self, mode, ap_ssid, ap_psk, known_networks, active_sta_ssid):
+        with self.lock:
+            active = next((n for n in known_networks if n["ssid"] == active_sta_ssid), None)
+            self.config["mode"] = mode
+            self.config["ap_ssid"] = ap_ssid
+            self.config["ap_psk"] = ap_psk
+            self.config["known_networks"] = known_networks
+            self.config["sta_ssid"] = active["ssid"] if active else ""
+            self.config["sta_psk"] = active["psk"] if active else ""
+            save_config(self.config)
+
+            if mode == "sta":
+                ok = self.switch_to_station()
+                fell_back = not ok
+            else:
+                ok = self.switch_to_ap()
+                fell_back = False
+            self.last_switch_ok = ok
+            self.last_switch_fell_back = fell_back
+            return {"ok": ok, "fell_back": fell_back}
 
     def run(self):
         self.connect_bridge()
-        self.sync_boot_state()
+        with self.lock:
+            self.sync_boot_state()
 
-        logger.info("wifi_mode_daemon started; polling button state every %.1fs", POLL_INTERVAL_S)
+        GuiSocketServer(self).start()
+
+        logger.info("wifi_mode_daemon started; polling jumper state every %.1fs", POLL_INTERVAL_S)
         while True:
             try:
                 if self.bridge.call("poll_wifi_button"):
                     self.toggle()
             except (TimeoutError, OSError) as e:
-                logger.warning("Button poll failed: %s", e)
+                logger.warning("Jumper poll failed: %s", e)
             time.sleep(POLL_INTERVAL_S)
 
 

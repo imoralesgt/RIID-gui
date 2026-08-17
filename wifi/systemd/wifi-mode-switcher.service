@@ -1,5 +1,5 @@
 [Unit]
-Description=RIID WiFi AP/Station mode switcher (push-button triggered)
+Description=RIID WiFi AP/Station mode switcher
 After=NetworkManager.service
 Wants=NetworkManager.service
 
