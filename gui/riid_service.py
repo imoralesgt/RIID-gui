@@ -24,6 +24,7 @@ from state_engine import SpectrumAcquisitionSystem
 from ml_inference import MlInference
 from ml_preprocessing import MLPreprocessing
 from mcu_interface import ArduinoInterface
+from wifi_interface import WifiInterface
 
 class RIIDCoreService:
     """Central hardware/service orchestration hub for the RIID station.
@@ -153,6 +154,12 @@ class RIIDCoreService:
         # RPC router. Must be constructed before the first set_state() call
         # below, since set_state() dereferences self.mcu_iface.
         self.mcu_iface = ArduinoInterface()
+
+        # Client for the standalone WiFi mode daemon's local socket (see
+        # wifi/wifi_mode_daemon.py) - used by view_network.py's Network Setup
+        # card. Unrelated to mcu_iface/RPC bridge above past sharing the same
+        # wire format; this never touches the DAQ/MCU hardware.
+        self.wifi_iface = WifiInterface()
 
         # Operational State Flags
         self.set_state('IDLE')

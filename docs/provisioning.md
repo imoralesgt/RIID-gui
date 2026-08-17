@@ -126,11 +126,13 @@ compiles the sketch once and uploads it over SSH to every host listed in
 verified on Linux so far; it should work the same way under Windows Git
 Bash or on macOS, but neither has actually been tried.
 
-## 6. Wire the external WiFi mode button
+## 6. Wire the WiFi mode jumper (optional)
 
-Wire a momentary push-button between pin **D13** and an adjacent **GND**
-pin on the JDIGITAL header - see
-[`wifi/README.md`](../wifi/README.md#hardware-wiring-the-button).
+The GUI's Network Setup card (step 8) is the primary way to switch WiFi
+mode - this step is only needed for the advanced/manual fallback path. Wire
+a momentary jumper/button between pin **D13** and an adjacent **GND** pin on
+the JDIGITAL header - see
+[`wifi/README.md`](../wifi/README.md#hardware-wiring-the-jumper).
 
 ## 7. Set up the WiFi mode daemon
 
@@ -139,11 +141,18 @@ cd ~/Gits/RIID-gui/wifi
 sudo ./setup.sh
 ```
 
-Prompts for the system ID, the Station network SSID/passphrase, and the
-Access Point passphrase (defaults to the shared `RIID_IAEA`), then writes
-`config/wifi_config.json`, runs `uv sync`, installs the sudoers rule and
-systemd service (both automatically pointed at this checkout), and starts
-the daemon.
+Prompts for the Access Point SSID/passphrase, then the Station network
+SSID/passphrase (defaults to the shared `RIID_IAEA` for the AP passphrase),
+then writes `config/wifi_config.json`, runs `uv sync`, installs the sudoers
+rule and systemd service (both automatically pointed at this checkout), and
+starts the daemon.
+
+> **Note:** this restarts the daemon, which immediately applies the boot
+> mode in `config/wifi_config.json` (Access Point, on a fresh setup). If
+> this board's only network path is the WiFi interface being reconfigured,
+> an SSH/Tailscale session over that same network will be dropped the
+> moment the service restarts - have local/physical access (or the jumper
+> from step 6) ready before running this remotely.
 
 Verify:
 
@@ -183,7 +192,9 @@ if reachable over Tailscale) from that other device.
   the rest of the interface still works).
 - The LED matrix scrolls status text; LED4 reflects the GUI's current state
   (blue/red/green/purple).
-- LED3 shows white (Station mode, the default) or red (AP mode).
-- Holding the WiFi button for 5+ seconds toggles LED3 and flashes a
-  matching matrix message (`STA MODE - <ssid>`, `AP MODE`, or
-  `STA FAILED -> AP MODE`).
+- LED3 shows red (Access Point mode, the default) or white (Station mode).
+- The GUI's Network Setup card (Hardware & Calibration tab) switches between
+  Access Point and Station mode, and manages known Station networks.
+- If the jumper from step 6 is wired, holding it closed for 5+ seconds also
+  toggles LED3 and flashes a matching matrix message (`STA MODE - <ssid>`,
+  `AP MODE`, or `STA FAILED -> AP MODE`).

@@ -311,6 +311,11 @@ class WifiModeDaemon:
             }
 
     def handle_scan_networks(self):
+        if self.mode == WIFI_MODE_AP:
+            # Scanning forces the radio off AP duty momentarily, dropping any
+            # client currently connected through it - including, likely,
+            # whoever just clicked this from the GUI.
+            raise RuntimeError("Cannot scan for networks while in Access Point mode - it would disconnect anyone connected through this system's AP.")
         result = subprocess.run(
             ["nmcli", "-t", "-f", "SSID,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
             capture_output=True, text=True, check=True, timeout=20,

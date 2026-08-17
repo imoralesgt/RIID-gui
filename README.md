@@ -11,7 +11,7 @@ For provisioning (setting up) a new Arduino UNO Q from scratch (OS prerequisites
 - `gui/` — the NiceGUI web application (this is what you run).
 - `daq-core/NSIL-MCA-DPP4SiPM/` — git submodule containing the DAQ board firmware/hardware sources and its `python-api` communications package, which the GUI depends on to talk to the board.
 - `mcu/` — Arduino UNO Q sketch driving the RIID system's onboard RGB LED and LED matrix as a physical status display, remote-controlled by the GUI over RPC. See [`mcu/README.md`](mcu/README.md).
-- `wifi/` — standalone daemon that toggles the system's WiFi between Access Point and Station mode on a long push-button hold, independent of `gui/`. See [`wifi/README.md`](wifi/README.md).
+- `wifi/` — standalone daemon that switches the system's WiFi between Access Point and Station mode, controlled from the GUI's Network Setup card (or, as an advanced/manual fallback, a jumper cable), independent of `gui/`. See [`wifi/README.md`](wifi/README.md).
 - `deprecated-ml-core/` — **DEPRECATED**, not a `uv` workspace member. Historical record of the RIID model R&D: preprocessing/inference prototypes, the Keras→TFLite conversion notebook, an early Arduino Uno Q deployment target, and real-hardware validation spectra. See [Machine learning model (RIID)](#machine-learning-model-riid) below.
 - `utils/spectrum_recorder/` — standalone spectrum recording utility/library.
 
@@ -117,8 +117,8 @@ Driven independently by the standalone WiFi daemon (see [`wifi/README.md`](wifi/
 
 | Mode | Color |
 |---|---|
-| Station (connected to a predefined network) | White |
-| Access Point (broadcasting `IAEA_RIID_<sys_id>`) | Red |
+| Station (connected to a known network) | White |
+| Access Point (broadcasting this system's configured SSID) | Red |
 
 #### LED matrix
 
@@ -129,7 +129,23 @@ A single scrolling text display shared by both subsystems above:
 
 #### Switching between AP and Station mode
 
-A small momentary push-button, wired between pin `D13` and `GND` on the JDIGITAL header (see [`wifi/README.md`](wifi/README.md#hardware-wiring-the-button) for wiring details), toggles the WiFi mode: **holding it down for 5+ seconds** switches the system between connecting to a predefined Station network and broadcasting its own Access Point. Every system boots into Station mode by default; if the Station connection repeatedly fails, it automatically falls back to Access Point mode instead (visibly, via the "STA FAILED" matrix message above). This whole feature — button, LED3, and the AP/Station switch itself — is handled entirely by a standalone daemon, independent of the GUI (see [`wifi/README.md`](wifi/README.md)).
+The **Network Setup** card (Hardware & Calibration tab) is the primary way to
+switch WiFi mode: pick Access Point or Station, manage known Station
+networks (scan for nearby ones, or enter an SSID/passphrase by hand), and set
+the Access Point's own SSID/passphrase. Applying a change requires
+confirming a warning that the system's network connection - and likely the
+browser session itself, if it's reached over WiFi - is about to change.
+
+As an advanced/manual fallback, a jumper cable wired between pin `D13` and
+`GND` on the JDIGITAL header (see [`wifi/README.md`](wifi/README.md#hardware-wiring-the-jumper)
+for wiring details) also toggles the WiFi mode: **holding it closed for 5+
+seconds** switches between Station and Access Point. Every system boots into
+Access Point mode by default; if a Station connection repeatedly fails, it
+automatically falls back to Access Point mode instead (visibly, via the "STA
+FAILED" matrix message above). This whole feature — GUI card, jumper, LED3,
+and the AP/Station switch itself — is handled by a standalone daemon that the
+GUI talks to over a local socket, independent of `gui/`'s own process (see
+[`wifi/README.md`](wifi/README.md)).
 
 ## Machine learning model (RIID)
 

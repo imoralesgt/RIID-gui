@@ -7,6 +7,7 @@ Run directly with ``uv run main.py`` (see the repository README).
 """
 
 from nicegui import app, ui
+import asyncio
 import os
 from config import BRAND_COLORS, logger
 from riid_service import RIIDCoreService
@@ -14,6 +15,7 @@ from view_spectrum_id import SpectrumPlotContainer, ControlPanelSidebar
 from view_recording import SpectrumRecordingPanel
 from view_download import SpectraDownloadPanel
 from view_calibration import HardwareCalibrationPanel
+from view_network import NetworkSetupPanel
 
 # Explicitly serves just this one file at a known URL, rather than relying on
 # ui.image()'s implicit "pass it a local path and hope it gets auto-served"
@@ -64,6 +66,7 @@ class RIIDSpectroscopyApp:
         
         # Explicitly define direct widget instance tracking anchors
         self.calibration_panel = None
+        self.network_panel = None
         self.plot_view = None
         self.sidebar = None
         self.last_hardware_ok = True
@@ -74,7 +77,25 @@ class RIIDSpectroscopyApp:
         
         # Formally bind the instance sync tick to the active NiceGUI scheduler loop
         ui.timer(1.0, self.global_ui_sync_tick)
+        # Separate slower timer, so an unreachable WiFi daemon can't stall the 1s sync tick.
+        ui.timer(5.0, self._refresh_wifi_mode_badge)
         logger.info("[UI_MOUNT] UI sync timer loop attached at 1.0s interval. Mounting complete.")
+
+    async def _refresh_wifi_mode_badge(self):
+        state = await asyncio.to_thread(backend_service.wifi_iface.get_state)
+        self._set_wifi_mode_badge(state['mode'] if state else None)
+
+    def _set_wifi_mode_badge(self, mode):
+        """Colors match LED3 on the board: red for AP, white for STA."""
+        colors = {
+            'ap': ('#DC2626', '#DC2626', '#FFFFFF'),
+            'sta': ('#FFFFFF', '#D1D5DB', '#1F2937'),
+            None: ('#F3F4F6', '#E5E7EB', '#9CA3AF'),
+        }
+        bg, border, fg = colors.get(mode, colors[None])
+        self.wifi_mode_badge.style(f'background-color: {bg}; border-color: {border};')
+        self.wifi_mode_icon.style(f'color: {fg};')
+        self.wifi_mode_label.style(f'color: {fg};').set_text(mode.upper() if mode else '--')
 
     def update_browser_tab_title(self):
         """Updates the actual browser tab title text dynamically based on profile records."""
@@ -175,10 +196,17 @@ class RIIDSpectroscopyApp:
                     # embedded directly in the Station ID box itself, rather than
                     # being a separate adjacent pill.
                     with ui.column().classes('items-end gap-1'):
-                        with ui.row().classes('items-center gap-0 px-3 py-1 rounded bg-white shadow-sm border border-blue-200 no-wrap'):
-                            self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold text-blue-700')
-                            ui.label('|').classes('text-xs font-mono text-zinc-300 mx-2')
-                            self.banner_status_pill = ui.label("").classes('text-xs font-mono font-bold')
+                        with ui.row().classes('items-center gap-2 no-wrap'):
+                            self.wifi_mode_badge = ui.row().classes('items-center gap-1 px-2 py-1 rounded-full shadow-sm border no-wrap')
+                            with self.wifi_mode_badge:
+                                self.wifi_mode_icon = ui.icon('wifi', size='xs')
+                                self.wifi_mode_label = ui.label('--').classes('text-xs font-mono font-bold')
+                            self._set_wifi_mode_badge(None)
+
+                            with ui.row().classes('items-center gap-0 px-3 py-1 rounded bg-white shadow-sm border border-blue-200 no-wrap'):
+                                self.station_id_badge = ui.label("Station Node: Syncing...").classes('text-xs font-mono font-bold text-blue-700')
+                                ui.label('|').classes('text-xs font-mono text-zinc-300 mx-2')
+                                self.banner_status_pill = ui.label("").classes('text-xs font-mono font-bold')
                         
                         # Global Interlock Connectivity Banner View Card - sized to
                         # its own content rather than a fixed max-width, so the
@@ -223,7 +251,14 @@ class RIIDSpectroscopyApp:
                         SpectraDownloadPanel(backend_service)
 
                     with ui.tab_panel(self.tab_hardware).classes('p-0 m-0 bg-transparent'):
-                        self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title, push_profile_callback=backend_service.push_active_profile_to_board)
+                        # Side-by-side on wide screens so Commit stays visually
+                        # grouped with calibration, and Network Setup doesn't
+                        # push below the fold. Stacks single-column below lg.
+                        with ui.row().classes('w-full gap-3 items-stretch flex-col lg:flex-row no-wrap'):
+                            with ui.column().classes('w-full lg:w-2/3 gap-0'):
+                                self.calibration_panel = HardwareCalibrationPanel(backend_service.system, title_sync_callback=self.update_browser_tab_title, push_profile_callback=backend_service.push_active_profile_to_board)
+                            with ui.column().classes('w-full lg:w-1/3 gap-0'):
+                                self.network_panel = NetworkSetupPanel(backend_service.system, backend_service.wifi_iface)
 
     def global_ui_sync_tick(self):
         """Drives all real-time component updates and handles dynamic layout changes."""
@@ -292,6 +327,10 @@ class RIIDSpectroscopyApp:
             if self.calibration_panel.last_bound_serial != current_serial:
                 logger.info(f"[UI_SYNC] Hardware discovery state transition detected. Forcing configuration fields update...")
                 self.calibration_panel.refresh_all_inputs()
+
+        # Keeps the composed AP SSID preview in sync with SYS-ID changes.
+        if self.network_panel is not None:
+            self.network_panel.refresh_sys_id_preview()
 
         # Sync subpanel layout charts states
         if self.sidebar is not None and self.plot_view is not None:
