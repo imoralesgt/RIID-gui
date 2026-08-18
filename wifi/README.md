@@ -69,6 +69,13 @@ any wiring.
   deliberate one. A successful connection turns LED3 white and shows
   `STA MODE: <ssid>` once, so the connected network is visible in the matrix
   as well.
+- **While live in Station mode**, a background watchdog checks every 5s that
+  the `riid-sta` NetworkManager connection is still active. After 10
+  consecutive failed checks (~50s) - e.g. the Access Point it was connected
+  to goes down or out of range - it falls back to AP mode the same way a
+  failed initial connection attempt does (LED3 red, `STA LOST -> AP MODE` on
+  the matrix). This is separate from the initial-connection retry logic
+  above, which only covers the moment a Station switch is first requested.
 - Every system boots into the mode recorded in `config/wifi_config.json`'s
   `mode` field (`"ap"` or `"sta"`), defaulting to **Access Point** - matching
   how commercial portable spectroscopy systems behave, and avoiding a
@@ -93,8 +100,8 @@ feature.
 ## Layout
 
 - `wifi_mode_daemon.py` — the daemon: the GUI-facing socket server, the
-  jumper's RPC polling loop, mode-switch/retry/fallback logic, and
-  boot-default handling.
+  jumper's RPC polling loop, mode-switch/retry/fallback logic, the Station
+  connectivity watchdog, and boot-default handling.
 - `scripts/switch_wifi_mode.sh <ap|sta> <ssid> [psk]` — renders the matching
   template and activates it via `nmcli`. Must run as root (the daemon already
   does, via systemd). `psk` is required for `ap`; for `sta` an empty/omitted

@@ -31,6 +31,11 @@ POLL_INTERVAL_S = 1.0
 # scroll fully across the matrix and stay legible before reverting.
 TRANSIENT_TEXT_MS = 20000
 
+# Slower than POLL_INTERVAL_S (which is tuned for jumper-button UX) so a
+# transient WiFi blip - AP reboot, DHCP renewal - doesn't trip a fallback.
+STA_CHECK_INTERVAL_S = 5.0
+STA_MAX_FAILURES = 10
+
 WIFI_MODE_AP = 0
 WIFI_MODE_STA = 1
 
@@ -379,6 +384,56 @@ class WifiModeDaemon:
         self.push_transient_text("STA FAILED -> AP MODE")
         return False
 
+    def is_sta_connected(self) -> bool:
+        """Checks whether the riid-sta NetworkManager connection is still active.
+
+        Returns:
+            bool: True if riid-sta is currently active, or if the check
+                itself failed to run (treated as inconclusive, not a
+                connectivity failure, to avoid false fallbacks from
+                transient nmcli/tooling errors).
+        """
+        try:
+            result = subprocess.run(
+                ["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"],
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("Could not check Station connectivity: %s", e)
+            return True
+        return "riid-sta" in result.stdout.splitlines()
+
+    def sta_watchdog_loop(self):
+        """Background thread: while live in Station mode, checks connectivity
+        every STA_CHECK_INTERVAL_S and falls back to Access Point mode after
+        STA_MAX_FAILURES consecutive failed checks.
+
+        Mirrors `handle_scan_networks`: the mode check and the (up to 10s)
+        nmcli call both run unlocked, so a slow check doesn't stall GUI/jumper
+        requests for that whole window - only the actual fallback switch is
+        guarded by `self.lock`.
+        """
+        fail_count = 0
+        while True:
+            time.sleep(STA_CHECK_INTERVAL_S)
+            if self.mode != WIFI_MODE_STA:
+                fail_count = 0
+                continue
+            if self.is_sta_connected():
+                fail_count = 0
+                continue
+
+            fail_count += 1
+            logger.warning("Station connectivity check failed (%d/%d)", fail_count, STA_MAX_FAILURES)
+            if fail_count >= STA_MAX_FAILURES:
+                logger.warning("Station connection lost; falling back to Access Point mode.")
+                with self.lock:
+                    ok = self.switch_to_ap(announce=False)
+                    self.last_switch_ok = ok
+                    self.last_switch_fell_back = True
+                self.push_transient_text("STA LOST -> AP MODE")
+                fail_count = 0
+
     def toggle(self):
         """Advanced/manual path: flips mode on a jumper-cable hold, reported
         by the MCU via `poll_wifi_button`."""
@@ -490,6 +545,7 @@ class WifiModeDaemon:
             self.sync_boot_state()
 
         GuiSocketServer(self).start()
+        threading.Thread(target=self.sta_watchdog_loop, daemon=True).start()
 
         logger.info("wifi_mode_daemon started; polling jumper state every %.1fs", POLL_INTERVAL_S)
         while True:
