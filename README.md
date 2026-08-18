@@ -11,7 +11,7 @@ For provisioning (setting up) a new Arduino UNO Q from scratch (OS prerequisites
 - `gui/` — the NiceGUI web application (this is what you run).
 - `daq-core/NSIL-MCA-DPP4SiPM/` — git submodule containing the DAQ board firmware/hardware sources and its `python-api` communications package, which the GUI depends on to talk to the board.
 - `mcu/` — Arduino UNO Q sketch driving the RIID system's onboard RGB LED and LED matrix as a physical status display, remote-controlled by the GUI over RPC. See [`mcu/README.md`](mcu/README.md).
-- `wifi/` — standalone daemon that switches the system's WiFi between Access Point and Station mode, controlled from the GUI's Network Setup card (or, as an advanced/manual fallback, a jumper cable), independent of `gui/`. See [`wifi/README.md`](wifi/README.md).
+- `wifi/` — standalone daemon that switches the system's WiFi between Access Point and Station mode, controlled from the GUI's Network Setup card (or, as an advanced/manual fallback, a jumper cable), independent of `gui/`. See [`wifi/README.md`](wifi/README.md). **Every system boots into Access Point mode by default — join SSID `IAEA_RIID_SYSXX` (passphrase `RIID_IAEA`) and browse to `http://10.42.0.1:8080`** (see [Switching between AP and Station mode](#switching-between-ap-and-station-mode) below).
 - `deprecated-ml-core/` — **DEPRECATED**, not a `uv` workspace member. Historical record of the RIID model R&D: preprocessing/inference prototypes, the Keras→TFLite conversion notebook, an early Arduino Uno Q deployment target, and real-hardware validation spectra. See [Machine learning model (RIID)](#machine-learning-model-riid) below.
 - `utils/spectrum_recorder/` — standalone spectrum recording utility/library.
 
@@ -135,6 +135,15 @@ networks (scan for nearby ones, or enter an SSID/passphrase by hand), and set
 the Access Point's own SSID/passphrase. Applying a change requires
 confirming a warning that the system's network connection - and likely the
 browser session itself, if it's reached over WiFi - is about to change.
+
+> **Connecting to the system in Access Point mode:** join the system's
+> broadcast SSID from another device, then browse to **`http://10.42.0.1:8080`**
+> — the fixed address the system always assigns itself in AP mode. In this
+> mode the system isn't on any external network, so there's no
+> hostname/Tailscale address to use instead. Until changed via the Network
+> Setup card, the default SSID is **`IAEA_RIID_SYSXX`** (`SYSXX` = this
+> system's own `SYS-ID`) with passphrase **`RIID_IAEA`**. See
+> [`wifi/README.md`](wifi/README.md#how-it-works) for details.
 
 As an advanced/manual fallback, a jumper cable wired between pin `D13` and
 `GND` on the JDIGITAL header (see [`wifi/README.md`](wifi/README.md#hardware-wiring-the-jumper)
