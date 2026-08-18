@@ -105,6 +105,11 @@ if [[ -z "$uv_bin" ]]; then
     echo "Error: 'uv' not found for user $SUDO_USER. Install it first - see docs/provisioning.md." >&2
     exit 1
 fi
+# .venv may be left over from an earlier/interrupted run and no longer
+# contain a working interpreter - uv sync refuses to reuse it in that case
+# instead of rebuilding it, so clear it first to keep this script unable
+# to execute.
+rm -rf "$SCRIPT_DIR/.venv"
 echo "Running 'uv sync' as $SUDO_USER..."
 run_as_user "$uv_bin" sync --project "$SCRIPT_DIR"
 
