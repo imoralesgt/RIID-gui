@@ -23,6 +23,10 @@ Imported by every other module in this package for shared configuration: data di
 - **DETECTORS_DB_PATH**
 - **SOURCES_DB_PATH**
 - **HARDWARE_DEFAULTS**
+- **WIFI_DB_FILENAME**
+- **WIFI_DB_PATH**
+- **WIFI_DEFAULTS**
+- **WIFI_SOCKET_PATH**
 
 ---
 

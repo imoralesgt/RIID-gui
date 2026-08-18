@@ -43,7 +43,7 @@ Builds the panel's widgets.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_calibration.py#L99"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_calibration.py#L101"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `refresh_all_inputs`
 

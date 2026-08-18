@@ -14,7 +14,7 @@ Instantiates the shared :class:`~riid_service.RIIDCoreService` backend singleton
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L43"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L45"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>function</kbd> `runtime_bootstrap_sequence`
 
@@ -27,7 +27,7 @@ App-startup hook: probes for hardware and starts the background service loops.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L320"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L367"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>function</kbd> `index`
 
@@ -40,12 +40,12 @@ Serves the station UI at the root route - one fresh app instance per client.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L55"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L57"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>class</kbd> `RIIDSpectroscopyApp`
 The top-level four-tab station UI, one instance per connected browser client. 
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L58"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L60"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `__init__`
 
@@ -60,7 +60,7 @@ Builds the workspace, sets the initial tab title, and starts the UI sync timer.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L151"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L180"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `build_workspace`
 
@@ -72,7 +72,7 @@ Constructs the visual container tree utilizing official palettes.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L228"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L271"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `global_ui_sync_tick`
 
@@ -84,7 +84,7 @@ Drives all real-time component updates and handles dynamic layout changes.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L79"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L108"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `update_browser_tab_title`
 
