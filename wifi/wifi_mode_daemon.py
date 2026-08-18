@@ -55,6 +55,7 @@ class _ArduinoBridge:
         self.lock = threading.Lock()
 
     def connect(self):
+        """Connects to the Arduino RPC socket and starts the background receive thread."""
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(self.socket_path)
         self.running = True
@@ -62,6 +63,20 @@ class _ArduinoBridge:
         self.recv_thread.start()
 
     def call(self, method, *args, timeout=5):
+        """Sends an RPC request and blocks for its response.
+
+        Args:
+            method (str): Name of the Arduino-side method to invoke.
+            *args: Positional arguments forwarded to that method.
+            timeout (float): Seconds to wait for a response.
+
+        Returns:
+            The method's return value, as decoded from the response.
+
+        Raises:
+            RuntimeError: If the Arduino side reported an error.
+            TimeoutError: If no response arrives within `timeout`.
+        """
         self.msg_counter += 1
         msgid = self.msg_counter
         packed = msgpack.packb([0, msgid, method, list(args)])
@@ -84,10 +99,17 @@ class _ArduinoBridge:
         raise TimeoutError(f"Timeout waiting for {method}")
 
     def notify(self, method, *args):
+        """Sends a fire-and-forget RPC notification (no response expected).
+
+        Args:
+            method (str): Name of the Arduino-side method to invoke.
+            *args: Positional arguments forwarded to that method.
+        """
         packed = msgpack.packb([2, method, list(args)])
         self.sock.sendall(packed)
 
     def disconnect(self):
+        """Closes the socket and stops the background receive thread."""
         self.running = False
         if self.sock:
             self.sock.close()
@@ -95,6 +117,7 @@ class _ArduinoBridge:
             self.recv_thread.join(timeout=1)
 
     def _receive_loop(self):
+        """Background thread: decodes incoming messages and dispatches responses."""
         unpacker = msgpack.Unpacker()
         while self.running:
             try:
@@ -108,6 +131,11 @@ class _ArduinoBridge:
                 break
 
     def _handle_response(self, msg):
+        """Resolves the pending `call()` matching a decoded response message.
+
+        Args:
+            msg (list): A decoded msgpack-rpc frame.
+        """
         if not isinstance(msg, list) or len(msg) < 4:
             return
         msg_type, msgid, error, result = msg[0], msg[1], msg[2], msg[3]
@@ -138,6 +166,7 @@ class GuiSocketServer:
         }
 
     def start(self):
+        """Binds the socket and starts the background accept-loop thread."""
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -151,11 +180,21 @@ class GuiSocketServer:
         threading.Thread(target=self._accept_loop, args=(server_sock,), daemon=True).start()
 
     def _accept_loop(self, server_sock):
+        """Background thread: accepts connections, one handler thread each.
+
+        Args:
+            server_sock (socket.socket): The listening server socket.
+        """
         while True:
             conn, _ = server_sock.accept()
             threading.Thread(target=self._handle_connection, args=(conn,), daemon=True).start()
 
     def _handle_connection(self, conn):
+        """Reads and dispatches messages from one client connection until it closes.
+
+        Args:
+            conn (socket.socket): The accepted client connection.
+        """
         unpacker = msgpack.Unpacker(raw=False)
         try:
             while True:
@@ -171,6 +210,12 @@ class GuiSocketServer:
             conn.close()
 
     def _handle_message(self, conn, msg):
+        """Dispatches one decoded request to its handler and replies with the result.
+
+        Args:
+            conn (socket.socket): The client connection to reply on.
+            msg (list): A decoded msgpack-rpc request frame.
+        """
         if not isinstance(msg, list) or len(msg) < 4 or msg[0] != 0:
             return
         _, msgid, method, args = msg
@@ -188,6 +233,11 @@ class GuiSocketServer:
 
 
 def load_config():
+    """Reads wifi_config.json, filling in any missing keys with defaults.
+
+    Returns:
+        dict: The daemon's configuration.
+    """
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
     config.setdefault("mode", "ap")
@@ -201,11 +251,26 @@ def load_config():
 
 
 def save_config(config):
+    """Persists the configuration dict to wifi_config.json.
+
+    Args:
+        config (dict): The daemon's configuration, as returned by `load_config`.
+    """
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
 
 def run_switch_script(mode, ssid, psk=None):
+    """Runs switch_wifi_mode.sh to actually reconfigure NetworkManager.
+
+    Args:
+        mode (str): "ap" or "sta".
+        ssid (str): SSID to configure.
+        psk (str | None): Passphrase, or None for an open Station network.
+
+    Returns:
+        bool: True if the script exited successfully.
+    """
     args = [SWITCH_SCRIPT, mode, ssid]
     if psk is not None:
         args.append(psk)
@@ -216,6 +281,13 @@ def run_switch_script(mode, ssid, psk=None):
 
 
 class WifiModeDaemon:
+    """Owns the current WiFi mode/config and drives every mode switch.
+
+    The single source of truth for `wifi_config.json` and the live NetworkManager
+    state; both the jumper-cable poll loop (`toggle`) and the GUI socket
+    (`handle_*`) go through this class, guarded by `self.lock`.
+    """
+
     def __init__(self):
         self.config = load_config()
         self.bridge = _ArduinoBridge()
@@ -225,6 +297,7 @@ class WifiModeDaemon:
         self.last_switch_fell_back = False
 
     def connect_bridge(self):
+        """Blocks until the Arduino RPC bridge socket is reachable, retrying every 5s."""
         while True:
             try:
                 self.bridge.connect()
@@ -235,18 +308,36 @@ class WifiModeDaemon:
                 time.sleep(5)
 
     def push_led(self, mode):
+        """Updates the board's WiFi-mode LED.
+
+        Args:
+            mode (int): `WIFI_MODE_AP` or `WIFI_MODE_STA`.
+        """
         try:
             self.bridge.notify("update_wifi_led", mode)
         except OSError as e:
             logger.warning("Could not update WiFi LED: %s", e)
 
     def push_transient_text(self, text):
+        """Scrolls a temporary status message across the LED matrix.
+
+        Args:
+            text (str): The message to display.
+        """
         try:
             self.bridge.notify("show_transient_text", text, TRANSIENT_TEXT_MS)
         except OSError as e:
             logger.warning("Could not update LED matrix: %s", e)
 
     def switch_to_ap(self, announce=True):
+        """Switches NetworkManager to Access Point mode using the current config.
+
+        Args:
+            announce (bool): Whether to scroll a "AP MODE" message on the LED matrix.
+
+        Returns:
+            bool: True if the switch script succeeded.
+        """
         logger.info("Switching to Access Point mode (%s)", self.config["ap_ssid"])
         ok = run_switch_script("ap", self.config["ap_ssid"], self.config["ap_psk"])
         self.mode = WIFI_MODE_AP
@@ -256,6 +347,16 @@ class WifiModeDaemon:
         return ok
 
     def switch_to_station(self, announce=True):
+        """Switches NetworkManager to Station mode, retrying and falling back to AP on failure.
+
+        Args:
+            announce (bool): Whether to scroll a "STA MODE: <ssid>" message on
+                success (a fallback failure message always shows regardless).
+
+        Returns:
+            bool: True if the Station connection succeeded; False if it fell
+                back to Access Point mode.
+        """
         ssid = self.config["sta_ssid"]
         psk = self.config["sta_psk"]
         if not ssid:
@@ -299,6 +400,12 @@ class WifiModeDaemon:
             self.switch_to_ap(announce=False)
 
     def handle_get_state(self):
+        """RPC handler: reports the current WiFi state to the GUI.
+
+        Returns:
+            dict: "mode", "ap_ssid", "ap_psk", "known_networks",
+                "active_sta_ssid", "last_switch_ok", "last_switch_fell_back".
+        """
         with self.lock:
             return {
                 "mode": "sta" if self.mode == WIFI_MODE_STA else "ap",
@@ -311,6 +418,14 @@ class WifiModeDaemon:
             }
 
     def handle_scan_networks(self):
+        """RPC handler: scans for nearby WiFi networks.
+
+        Returns:
+            list[dict]: De-duplicated {"ssid", "secured"} entries.
+
+        Raises:
+            RuntimeError: If currently live in Access Point mode.
+        """
         if self.mode == WIFI_MODE_AP:
             # Scanning forces the radio off AP duty momentarily, dropping any
             # client currently connected through it - including, likely,
@@ -334,6 +449,20 @@ class WifiModeDaemon:
         return networks
 
     def handle_apply_config(self, mode, ap_ssid, ap_psk, known_networks, active_sta_ssid):
+        """RPC handler: saves new settings and switches to the requested mode.
+
+        Args:
+            mode (str): "ap" or "sta".
+            ap_ssid (str): Complete Access Point SSID.
+            ap_psk (str): Access Point passphrase.
+            known_networks (list[dict]): {"ssid", "psk"} dicts for all saved
+                Station networks.
+            active_sta_ssid (str): SSID (from `known_networks`) to connect to
+                when `mode` is "sta".
+
+        Returns:
+            dict: {"ok": bool, "fell_back": bool} describing the outcome.
+        """
         with self.lock:
             active = next((n for n in known_networks if n["ssid"] == active_sta_ssid), None)
             self.config["mode"] = mode
@@ -355,6 +484,7 @@ class WifiModeDaemon:
             return {"ok": ok, "fell_back": fell_back}
 
     def run(self):
+        """Connects the Arduino bridge, applies boot state, and polls the jumper forever."""
         self.connect_bridge()
         with self.lock:
             self.sync_boot_state()
@@ -372,6 +502,7 @@ class WifiModeDaemon:
 
 
 def main():
+    """Entry point: builds and runs the daemon."""
     WifiModeDaemon().run()
 
 

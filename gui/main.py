@@ -78,15 +78,23 @@ class RIIDSpectroscopyApp:
         # Formally bind the instance sync tick to the active NiceGUI scheduler loop
         ui.timer(1.0, self.global_ui_sync_tick)
         # Separate slower timer, so an unreachable WiFi daemon can't stall the 1s sync tick.
-        ui.timer(5.0, self._refresh_wifi_mode_badge)
+        ui.timer(5.0, self._refresh_wifi_mode_state)
         logger.info("[UI_MOUNT] UI sync timer loop attached at 1.0s interval. Mounting complete.")
 
-    async def _refresh_wifi_mode_badge(self):
+    async def _refresh_wifi_mode_state(self):
+        """Polls the WiFi daemon's live mode and updates the badge and Network Setup card."""
         state = await asyncio.to_thread(backend_service.wifi_iface.get_state)
-        self._set_wifi_mode_badge(state['mode'] if state else None)
+        mode = state['mode'] if state else None
+        self._set_wifi_mode_badge(mode)
+        if self.network_panel is not None:
+            self.network_panel.set_live_mode(mode)
 
     def _set_wifi_mode_badge(self, mode):
-        """Colors match LED3 on the board: red for AP, white for STA."""
+        """Updates the header WiFi badge. Colors match LED3 on the board: red for AP, white for STA.
+
+        Args:
+            mode (str | None): "ap", "sta", or None if the daemon is unreachable.
+        """
         colors = {
             'ap': ('#DC2626', '#DC2626', '#FFFFFF'),
             'sta': ('#FFFFFF', '#D1D5DB', '#1F2937'),

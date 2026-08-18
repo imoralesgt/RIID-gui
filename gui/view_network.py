@@ -57,6 +57,11 @@ class NetworkSetupPanel:
     # --- Local cache (gui/data/conf/wifi.json) ---------------------------
 
     def _load_cache(self) -> dict:
+        """Reads the local WiFi settings cache, or the defaults if absent/unreadable.
+
+        Returns:
+            dict: WiFi settings, keyed the same as `WIFI_DEFAULTS`.
+        """
         if os.path.exists(WIFI_DB_PATH):
             try:
                 with open(WIFI_DB_PATH, "r", encoding="utf-8") as f:
@@ -67,6 +72,7 @@ class NetworkSetupPanel:
         return dict(WIFI_DEFAULTS)
 
     def _save_cache(self):
+        """Writes the panel's current settings to the local WiFi settings cache."""
         try:
             os.makedirs(os.path.dirname(WIFI_DB_PATH), exist_ok=True)
             with open(WIFI_DB_PATH, "w", encoding="utf-8") as f:
@@ -83,12 +89,24 @@ class NetworkSetupPanel:
     # --- AP SSID composition ----------------------------------------------
 
     def _current_sys_id(self) -> str:
+        """Returns the active hardware profile's SYS-ID.
+
+        Returns:
+            str: The current SYS-ID, or "SYS-STANDBY" if unset.
+        """
         return self.system.hw_profile.get("SYS-ID", "SYS-STANDBY")
 
     def _strip_sys_id_suffix(self, full_ssid: str) -> str:
         """Best-effort recovery of the customizable part from a full SSID
         (e.g. loading state the daemon already has) - falls back to the
-        whole string if it doesn't end with the current SYS-ID."""
+        whole string if it doesn't end with the current SYS-ID.
+
+        Args:
+            full_ssid (str): A complete AP SSID, as stored by the daemon.
+
+        Returns:
+            str: The customizable part, with the SYS-ID suffix removed.
+        """
         suffix = f"_{self._current_sys_id()}"
         if full_ssid.endswith(suffix):
             return full_ssid[: -len(suffix)]
@@ -99,7 +117,14 @@ class NetworkSetupPanel:
         SYS-ID suffix. The SYS-ID always survives intact - if the combined
         length would exceed the 32-byte 802.11 SSID limit, the customizable
         part is shortened further (below its normal 24-char cap), never the
-        suffix."""
+        suffix.
+
+        Args:
+            custom (str): The user-editable part of the SSID.
+
+        Returns:
+            str: The complete SSID to send to the WiFi daemon.
+        """
         sys_id = self._current_sys_id()
         custom = (custom or WIFI_DEFAULTS["ap_ssid_custom"]).strip()[:AP_SSID_MAX_LEN]
         max_custom_len = max(0, 32 - 1 - len(sys_id))
@@ -109,11 +134,11 @@ class NetworkSetupPanel:
     # --- Layout -------------------------------------------------------------
 
     def render_layout(self):
+        """Builds the mode selector, AP/Station settings sections, and Apply button."""
         with ui.card().classes('w-full h-full p-4 rounded-lg border shadow-md bg-white space-y-3'):
             ui.label('Network Setup').classes('text-xs font-bold uppercase tracking-wider text-zinc-700 border-b pb-1 w-full')
 
-            # Radio (not a toggle) makes "exactly one mode active" explicit,
-            # and pairs with only showing that mode's settings below.
+            # Only one mode is ever active, so only that mode's settings render below.
             ui.label('Select WiFi Mode').classes('text-sm font-bold text-zinc-800')
             self.mode_radio = ui.radio(
                 {'ap': 'Access Point (AP)', 'sta': 'Station (STA)'}, value=self.mode
@@ -138,7 +163,7 @@ class NetworkSetupPanel:
                     self.new_ssid_input = ui.input('SSID').props('dense outlined').classes('flex-1 text-xs')
                     self.new_psk_input = ui.input('Passphrase (blank = open)', password=True, password_toggle_button=True).props('dense outlined').classes('flex-1 text-xs')
                     ui.button(icon='add', on_click=self.add_network).props('dense round outline')
-                ui.button('Scan for networks', icon='wifi_find', on_click=self.do_scan).props('dense outline').classes('text-xs')
+                self.scan_button = ui.button('Scan for networks', icon='wifi_find', on_click=self.do_scan).props('dense outline').classes('text-xs')
                 self.scan_results_select = ui.select(options=[], label='Scanned networks - pick to prefill above').props('dense outlined').classes('w-full text-xs')
                 self.scan_results_select.on_value_change(lambda e: self._prefill_from_scan(e.value))
                 self.scan_results_select.set_visibility(False)
@@ -150,6 +175,7 @@ class NetworkSetupPanel:
             self.mode_radio.on_value_change(lambda e: self._apply_mode_visibility())
             self._apply_mode_visibility()
             self._refresh_networks_list()
+            self.set_live_mode(self.mode)
 
             with ui.row().classes('w-full mt-1 justify-end'):
                 ui.button('APPLY NETWORK CHANGES', icon='wifi_tethering', on_click=self.open_warning_dialog) \
@@ -164,7 +190,19 @@ class NetworkSetupPanel:
         though the operator hasn't touched this card."""
         self._refresh_ap_preview()
 
+    def set_live_mode(self, mode):
+        """Disables Scan while the daemon is actually in AP mode - this can
+        differ from mode_radio.value, which only reflects the operator's
+        (not-yet-applied) selection in this form.
+
+        Args:
+            mode (str | None): The daemon's live mode ("ap"/"sta"), or None
+                if the daemon isn't reachable.
+        """
+        self.scan_button.set_enabled(mode != 'ap')
+
     def _refresh_ap_preview(self):
+        """Updates the read-only full-SSID label from the current input values."""
         full = self._composed_ap_ssid(self.ap_name_input.value)
         self.ap_ssid_preview.set_text(f"Full Access Point SSID: {full}")
 
@@ -177,6 +215,7 @@ class NetworkSetupPanel:
     # --- Known networks list -------------------------------------------------
 
     def _refresh_networks_list(self):
+        """Redraws the known-networks list and syncs the active-network select."""
         self.networks_container.clear()
         with self.networks_container:
             if not self.known_networks:
@@ -197,6 +236,7 @@ class NetworkSetupPanel:
         self.active_network_select.update()
 
     def add_network(self):
+        """Validates and adds (or replaces) an entry in the known-networks list."""
         ssid = (self.new_ssid_input.value or '').strip()
         psk = self.new_psk_input.value or ''
         if not ssid:
@@ -214,15 +254,27 @@ class NetworkSetupPanel:
         self._refresh_networks_list()
 
     def delete_network(self, ssid):
+        """Removes an entry from the known-networks list.
+
+        Args:
+            ssid (str): SSID of the network to remove.
+        """
         self.known_networks = [n for n in self.known_networks if n['ssid'] != ssid]
         if self.active_sta_ssid == ssid:
             self.active_sta_ssid = ""
         self._refresh_networks_list()
 
     def _set_active_network(self, e):
+        """Updates which known network Station mode will connect to.
+
+        Args:
+            e (nicegui.events.ValueChangeEventArguments): Select change event;
+                `e.value` is the newly picked SSID.
+        """
         self.active_sta_ssid = e.value or ""
 
     async def do_scan(self):
+        """Scans for nearby networks and populates the pick-list, unless live in AP mode."""
         # Checked live (not self.mode, which only reflects state as of page
         # load) - scanning while actually in AP mode disconnects anyone
         # connected through this system's own AP, likely including this GUI
@@ -251,6 +303,12 @@ class NetworkSetupPanel:
         self.scan_results_select.update()
 
     def _prefill_from_scan(self, label):
+        """Copies a picked scan result into the add-network SSID field.
+
+        Args:
+            label (str | None): The selected option from `scan_results_select`,
+                formatted as "SSID (secured|open)".
+        """
         if not label:
             return
         ssid = label.rsplit(' (', 1)[0]
@@ -260,6 +318,7 @@ class NetworkSetupPanel:
     # --- Apply flow: warning -> confirmation -> apply -------------------------
 
     def _build_dialogs(self):
+        """Builds the warning and confirmation dialogs for the Apply flow."""
         with ui.dialog() as self.warning_dialog, ui.card().classes('p-4 w-[90vw] max-w-96 space-y-3'):
             ui.label('Change network settings?').classes('text-sm font-bold').style(f"color: {BRAND_COLORS['crimson_trace']};")
             ui.label(
@@ -284,6 +343,7 @@ class NetworkSetupPanel:
                 confirm_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1')
 
     def open_warning_dialog(self):
+        """Validates the pending settings, then opens the warning dialog."""
         if self.mode_radio.value == 'sta' and not self.active_sta_ssid:
             ui.notify("Select (or add) a Station network first.", type="negative")
             return
@@ -294,6 +354,7 @@ class NetworkSetupPanel:
         self.warning_dialog.open()
 
     async def open_confirm_dialog(self):
+        """Closes the warning dialog and opens the confirmation dialog with a summary."""
         self.warning_dialog.close()
         # Yield briefly - closing one dialog and opening another in the same
         # tick can race Quasar's transition and drop the second open().
@@ -311,6 +372,7 @@ class NetworkSetupPanel:
         self.confirm_dialog.open()
 
     async def do_apply(self):
+        """Sends the pending settings to the WiFi daemon and reports the outcome."""
         mode = self.mode_radio.value
         self.mode = mode
         self.ap_ssid_custom = (self.ap_name_input.value or '').strip()[:AP_SSID_MAX_LEN]

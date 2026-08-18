@@ -30,6 +30,16 @@ class _WifiBridge:
         self.socket_path = socket_path
 
     def call(self, method, *args, timeout=5):
+        """Opens a connection, sends one RPC request, and returns its result.
+
+        Args:
+            method (str): Name of the daemon-side method to invoke.
+            *args: Positional arguments forwarded to that method.
+            timeout (float): Socket timeout in seconds.
+
+        Returns:
+            The method's return value, as decoded from the daemon's response.
+        """
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             sock.connect(self.socket_path)
@@ -63,7 +73,13 @@ class WifiInterface:
         self.bridge = _WifiBridge()
 
     def get_state(self):
-        """Returns the daemon's current WiFi state dict, or None if unreachable."""
+        """Fetches the daemon's current WiFi state.
+
+        Returns:
+            dict | None: Keys "mode", "ap_ssid", "ap_psk", "known_networks",
+                "active_sta_ssid", "last_switch_ok", "last_switch_fell_back";
+                or None if the daemon is unreachable.
+        """
         try:
             return self.bridge.call("get_state")
         except (OSError, RuntimeError) as e:
@@ -71,7 +87,13 @@ class WifiInterface:
             return None
 
     def scan_networks(self):
-        """Returns a list of {"ssid", "secured"} dicts, or None if unreachable/failed."""
+        """Asks the daemon to scan for nearby networks.
+
+        Returns:
+            list[dict] | None: {"ssid", "secured"} dicts, or None if the
+                daemon is unreachable or the scan failed (e.g. daemon is
+                live in AP mode).
+        """
         try:
             return self.bridge.call("scan_networks", timeout=25)
         except (OSError, RuntimeError) as e:
@@ -81,8 +103,18 @@ class WifiInterface:
     def apply_config(self, mode, ap_ssid, ap_psk, known_networks, active_sta_ssid):
         """Pushes new WiFi settings to the daemon and triggers the mode switch.
 
-        Returns a {"ok": bool, "fell_back": bool} dict on success, or None if
-        the daemon couldn't be reached at all.
+        Args:
+            mode (str): "ap" or "sta".
+            ap_ssid (str): Complete Access Point SSID (SYS-ID suffix included).
+            ap_psk (str): Access Point passphrase.
+            known_networks (list[dict]): {"ssid", "psk"} dicts for all saved
+                Station networks.
+            active_sta_ssid (str): SSID (from `known_networks`) to connect to
+                when `mode` is "sta".
+
+        Returns:
+            dict | None: {"ok": bool, "fell_back": bool} describing the
+                outcome, or None if the daemon couldn't be reached at all.
         """
         try:
             return self.bridge.call(
