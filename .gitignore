@@ -217,6 +217,9 @@ __marimo__/
 # RIID wifi mode switcher - real config with the site's Station SSID/passphrase
 wifi/config/wifi_config.json
 
+# RIID GUI's own WiFi Network Setup cache - same sensitivity as above
+gui/data/conf/wifi.json
+
 # Streamlit
 .streamlit/secrets.toml
 .claude

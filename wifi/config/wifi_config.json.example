@@ -1,7 +1,11 @@
 {
-  "sys_id": "SYSXX",
+  "mode": "ap",
+  "ap_ssid": "IAEA_RIID_SYSXX",
   "ap_psk": "RIID_IAEA",
   "sta_ssid": "SEIB-GUEST",
   "sta_psk": "",
+  "known_networks": [
+    {"ssid": "SEIB-GUEST", "psk": ""}
+  ],
   "max_sta_retries": 3
 }

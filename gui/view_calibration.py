@@ -34,31 +34,33 @@ class HardwareCalibrationPanel:
 
     def render_layout(self):
         """Builds the identity/calibration/advanced-settings fields and Commit button."""
-        with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
-            with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
-                with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3'):
+        with ui.card().classes('w-full h-full p-4 rounded-lg border shadow-md bg-white'):
+            with ui.row().classes('w-full gap-3 items-stretch no-wrap'):
+                with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
+                    ui.label('Detector Settings').classes('text-xs font-bold uppercase tracking-wider text-zinc-700 border-b pb-1 w-full')
                     with ui.row().classes('w-full gap-3 items-center'):
                         self.sn_badge = ui.label(f"MCA serial number: {self.system.serial_number}").classes('text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2 py-1 rounded border')
-                        
-                        self.sys_id_input = ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', HARDWARE_DEFAULTS['SYS-ID']), 
+
+                        self.sys_id_input = ui.input('System ID', value=self.system.hw_profile.get('SYS-ID', HARDWARE_DEFAULTS['SYS-ID']),
                                                      on_change=lambda e: self.system.hw_profile.update({'SYS-ID': e.value})).props('dense outlined').classes('w-28 text-xs')
-                        
-                        self.analyzer_name_input = ui.input('Analyzer Model Name', value=self.system.hw_profile.get('Analyzer name', HARDWARE_DEFAULTS['Analyzer name']), 
+
+                        self.analyzer_name_input = ui.input('Analyzer Model Name', value=self.system.hw_profile.get('Analyzer name', HARDWARE_DEFAULTS['Analyzer name']),
                                                              on_change=lambda e: self.system.hw_profile.update({'Analyzer name': e.value})).props('dense outlined').classes('flex-1 text-xs')
 
                     with ui.row().classes('w-full gap-3'):
                         self.det_type_input = ui.input('Detector Type Class', value=self.system.hw_profile.get('Detector type', HARDWARE_DEFAULTS['Detector type']), on_change=lambda e: self.system.hw_profile.update({'Detector type': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         self.det_size_input = ui.input('Detector Geometrical Size', value=self.system.hw_profile.get('Detector size', HARDWARE_DEFAULTS['Detector size']), on_change=lambda e: self.system.hw_profile.update({'Detector size': e.value})).props('dense outlined').classes('flex-1 text-xs')
                     self.det_sn_input = ui.input('Detector Factory S/N Code', value=self.system.hw_profile.get('Detector serial number', HARDWARE_DEFAULTS['Detector serial number']), on_change=lambda e: self.system.hw_profile.update({'Detector serial number': e.value})).props('dense outlined').classes('w-full text-xs')
-                    
+
                     ui.label('Energy Calibration Coefficients ($MCA_CAL Matrix Model)').classes('text-xs font-bold mt-2').style(f"color: {BRAND_COLORS['primary']};")
                     with ui.row().classes('w-full gap-2'):
                         self.cal_a0_input = ui.number('Offset / a0', value=self.system.hw_profile.get('calib_a0', HARDWARE_DEFAULTS['calib_a0']), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a0': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         self.cal_a1_input = ui.number('Linear Slope / a1', value=self.system.hw_profile.get('calib_a1', HARDWARE_DEFAULTS['calib_a1']), format='%.5f', on_change=lambda e: self.system.hw_profile.update({'calib_a1': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         self.cal_a2_input = ui.number('Quadratic Scalar / a2', value=self.system.hw_profile.get('calib_a2', HARDWARE_DEFAULTS['calib_a2']), format='%.3e', on_change=lambda e: self.system.hw_profile.update({'calib_a2': e.value})).props('dense outlined').classes('flex-1 text-xs')
 
-            with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
-                with ui.card().classes('w-full p-4 rounded-lg border shadow-md bg-white space-y-3 h-full'):
+                ui.separator().props('vertical').classes('self-stretch')
+
+                with ui.column().classes('gap-3 flex-1').style('width: 50%;'):
                     ui.label('Advanced MCA settings').classes('text-xs font-bold uppercase tracking-wider text-zinc-700 border-b pb-1 w-full')
                     with ui.row().classes('w-full gap-3'):
                         self.vga_gain_input = ui.number('Coarse VGA Analog Gain', value=self.system.hw_profile.get('vga_gain_coarse', HARDWARE_DEFAULTS['vga_gain_coarse']), format='%.2f', on_change=lambda e: self.system.hw_profile.update({'vga_gain_coarse': e.value})).props('dense outlined').classes('flex-1 text-xs')
@@ -73,28 +75,28 @@ class HardwareCalibrationPanel:
                         self.blr_input = ui.number('BLR Threshold Gain', value=self.system.hw_profile.get('blr_s_threshold_gain', HARDWARE_DEFAULTS['blr_s_threshold_gain']), format='%.2f', on_change=lambda e: self.system.hw_profile.update({'blr_s_threshold_gain': e.value})).props('dense outlined').classes('flex-1 text-xs')
                         self.invert_checkbox = ui.checkbox('Invert Pulse Polarity', value=self.system.hw_profile.get('invert_pulse', HARDWARE_DEFAULTS['invert_pulse']), on_change=lambda e: self.system.hw_profile.update({'invert_pulse': e.value})).classes('text-xs text-zinc-700 font-medium px-1')
 
-        with ui.row().classes('w-full mt-3 justify-end'):
-            def save_calibration_profile_to_database():
-                """Persists the profile to disk and, if possible, programs the board."""
-                logger.warning(f"[CALIB_PANEL] Operator clicked COMMIT button for S/N: {self.system.serial_number}")
-                self.system.db[self.system.serial_number] = {k: v for k, v in self.system.hw_profile.items()}
-                if self.system.save_hardware_db():
-                    ui.notify("Instrument calibration parameters permanently saved!", type="positive")
+            with ui.row().classes('w-full mt-3 justify-end'):
+                def save_calibration_profile_to_database():
+                    """Persists the profile to disk and, if possible, programs the board."""
+                    logger.warning(f"[CALIB_PANEL] Operator clicked COMMIT button for S/N: {self.system.serial_number}")
+                    self.system.db[self.system.serial_number] = {k: v for k, v in self.system.hw_profile.items()}
+                    if self.system.save_hardware_db():
+                        ui.notify("Instrument calibration parameters permanently saved!", type="positive")
 
-                    # Condition: COMMIT is one of only two triggers that push DPP
-                    # parameters down to the physical board (the other being initial
-                    # hardware probe on app/service launch).
-                    if self.push_profile_callback:
-                        if self.push_profile_callback():
-                            ui.notify("DPP parameters programmed to hardware.", type="positive")
-                        else:
-                            ui.notify("Saved, but hardware programming was skipped (offline or busy).", type="warning")
+                        # Condition: COMMIT is one of only two triggers that push DPP
+                        # parameters down to the physical board (the other being initial
+                        # hardware probe on app/service launch).
+                        if self.push_profile_callback:
+                            if self.push_profile_callback():
+                                ui.notify("DPP parameters programmed to hardware.", type="positive")
+                            else:
+                                ui.notify("Saved, but hardware programming was skipped (offline or busy).", type="warning")
 
-                    if self.title_sync_callback:
-                        self.title_sync_callback()
+                        if self.title_sync_callback:
+                            self.title_sync_callback()
 
 
-            ui.button('COMMIT CALIBRATION PARAMETERS', icon='save', on_click=save_calibration_profile_to_database).style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").classes('py-2 px-4 text-xs shadow-md rounded-md')
+                ui.button('COMMIT DETECTOR/MCA SETTINGS', icon='save', on_click=save_calibration_profile_to_database).style(f"background-color: {BRAND_COLORS['primary']}; color: #FFFFFF; font-weight: bold;").classes('py-2 px-4 text-xs shadow-md rounded-md')
 
     def refresh_all_inputs(self):
         """Forces all input boxes to refresh to match the active hardware profile parameters."""

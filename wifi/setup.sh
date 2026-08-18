@@ -19,7 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_PATH="$SCRIPT_DIR/config/wifi_config.json"
 
 run_as_user() {
-    sudo -u "$SUDO_USER" "$@"
+    # -H: without it HOME stays /root, which confuses uv's Python/cache
+    # resolution and breaks package installs into the venv.
+    sudo -H -u "$SUDO_USER" "$@"
 }
 
 existing_value() {
@@ -45,10 +47,17 @@ echo "Installing for user: $SUDO_USER"
 echo
 
 # --- Prompts (existing config values, if any, become the defaults) ---
-default_sys_id="$(existing_value sys_id "SYS06")"
-read -rp "System ID [$default_sys_id]: " sys_id
-sys_id="${sys_id:-$default_sys_id}"
+echo "--- Access Point mode settings ---"
+default_ap_ssid="$(existing_value ap_ssid "IAEA_RIID_SYS06")"
+read -rp "Access Point SSID [$default_ap_ssid]: " ap_ssid
+ap_ssid="${ap_ssid:-$default_ap_ssid}"
 
+default_ap_psk="$(existing_value ap_psk "RIID_IAEA")"
+read -rp "Access Point passphrase [$default_ap_psk]: " ap_psk
+ap_psk="${ap_psk:-$default_ap_psk}"
+
+echo
+echo "--- Station mode settings ---"
 default_sta_ssid="$(existing_value sta_ssid "")"
 read -rp "Station network SSID to connect to (leave empty to skip) [$default_sta_ssid]: " sta_ssid
 sta_ssid="${sta_ssid:-$default_sta_ssid}"
@@ -59,10 +68,6 @@ if [[ -n "$sta_ssid" ]]; then
     echo
 fi
 
-default_ap_psk="$(existing_value ap_psk "RIID_IAEA")"
-read -rp "Access Point passphrase [$default_ap_psk]: " ap_psk
-ap_psk="${ap_psk:-$default_ap_psk}"
-
 default_max_retries="$(existing_value max_sta_retries "3")"
 read -rp "Max Station connection retries [$default_max_retries]: " max_retries
 max_retries="${max_retries:-$default_max_retries}"
@@ -70,22 +75,32 @@ if ! [[ "$max_retries" =~ ^[0-9]+$ ]]; then
     echo "'$max_retries' isn't a number, using $default_max_retries instead." >&2
     max_retries="$default_max_retries"
 fi
+echo
 
 # --- Write config (owned by the invoking user, not root) ---
+# Boot mode always starts as AP; use the GUI to change it afterward.
+if [[ -n "$sta_ssid" ]]; then
+    known_networks_json="[{\"ssid\": \"$sta_ssid\", \"psk\": \"$sta_psk\"}]"
+else
+    known_networks_json="[]"
+fi
+
 run_as_user mkdir -p "$SCRIPT_DIR/config"
 run_as_user tee "$CONFIG_PATH" > /dev/null <<EOF
 {
-  "sys_id": "$sys_id",
+  "mode": "ap",
+  "ap_ssid": "$ap_ssid",
   "ap_psk": "$ap_psk",
   "sta_ssid": "$sta_ssid",
   "sta_psk": "$sta_psk",
+  "known_networks": $known_networks_json,
   "max_sta_retries": $max_retries
 }
 EOF
 echo "Wrote $CONFIG_PATH"
 
 # --- Install dependencies as the invoking user (not root) ---
-uv_bin="$(sudo -u "$SUDO_USER" bash -lc 'command -v uv' || true)"
+uv_bin="$(sudo -H -u "$SUDO_USER" bash -lc 'command -v uv' || true)"
 if [[ -z "$uv_bin" ]]; then
     echo "Error: 'uv' not found for user $SUDO_USER. Install it first - see docs/provisioning.md." >&2
     exit 1
@@ -122,7 +137,9 @@ systemctl restart wifi-mode-switcher.service
 
 echo
 echo "=== Done ==="
-echo "Remember to wire the external push-button (D13 to GND) if not done"
-echo "already - see wifi/README.md#hardware-wiring-the-button."
+echo "The GUI's Network Setup card (Hardware & Calibration tab) is the"
+echo "primary way to change these settings from here on. Wiring a jumper"
+echo "cable (D13 to GND) is optional, for the advanced/manual toggle path -"
+echo "see wifi/README.md#hardware-wiring-the-jumper."
 echo
 systemctl status wifi-mode-switcher.service --no-pager

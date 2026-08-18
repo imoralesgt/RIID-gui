@@ -150,6 +150,26 @@ HARDWARE_DEFAULTS = {
     "Detector geometry": "Cylindrical", 
     "Detector size": "3.8 cm diameter x 3.8 cm thick", 
     "Detector type number": "38B38/SIP-E3-X2",
-    "Detector serial number": "UNKNOWN", 
+    "Detector serial number": "UNKNOWN",
     "Analyzer name": "NSIL-DPP4SiPM"
 }
+
+WIFI_DB_FILENAME = "wifi.json"
+
+# Gitignored (holds network passphrases), unlike DETECTORS_DB_PATH/SOURCES_DB_PATH above.
+WIFI_DB_PATH = os.path.join(CONF_DIR, WIFI_DB_FILENAME)
+
+# The daemon (wifi/wifi_mode_daemon.py) is the source of truth whenever it's
+# reachable; this is only the fallback shown before the first successful
+# connection, and the shape written to WIFI_DB_PATH as a local cache.
+WIFI_DEFAULTS = {
+    "mode": "ap",
+    "ap_ssid_custom": "IAEA_RIID",
+    "ap_psk": "RIID_IAEA",
+    "known_networks": [],
+    "active_sta_ssid": "",
+}
+
+# Local Unix socket the WiFi daemon listens on for GUI requests (get_state /
+# scan_networks / apply_config) - see wifi/wifi_mode_daemon.py's GuiSocketServer.
+WIFI_SOCKET_PATH = "/var/run/riid-wifi.sock"
