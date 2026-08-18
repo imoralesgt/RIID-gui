@@ -19,7 +19,7 @@ for 5+ seconds is all that's needed, no external resistor required. This is
 optional: the GUI's Network Setup card covers the same functionality without
 any wiring.
 
-## How it works
+## Software architecture
 
 - **GUI control (primary)**: `wifi_mode_daemon.py` listens on a second local
   Unix socket, `/var/run/riid-wifi.sock`, using the same lightweight
@@ -55,6 +55,17 @@ any wiring.
   system `SYS06` becomes `IAEA_RIID_SYS06`. LED3 (the RGB LED dedicated to
   WiFi mode, distinct from the operating-status LED) turns red; the matrix
   shows the text `AP MODE` for a while.
+
+  > **Connecting to the system in AP mode:** join the broadcast SSID, then
+  > browse to **`http://10.42.0.1:8080`** - the fixed gateway address
+  > NetworkManager's `ipv4.method=shared` (see
+  > [`nm-templates/riid-ap.nmconnection.template`](nm-templates/riid-ap.nmconnection.template))
+  > always assigns itself in AP mode. There is no mDNS/Tailscale name to rely
+  > on here, since the system isn't on any external network in this mode.
+  > Until changed via the Network Setup card, the default SSID is
+  > **`IAEA_RIID_SYSXX`** (`SYSXX` = this system's own `SYS-ID`) with
+  > passphrase **`RIID_IAEA`** (from
+  > [`config/wifi_config.json.example`](config/wifi_config.json.example)).
 - **Station mode**: connects to whichever known network is selected as
   `sta_ssid`/`sta_psk` in `config/wifi_config.json` (gitignored — copy
   `wifi_config.json.example` to get started, or use the GUI's Network Setup
@@ -83,7 +94,7 @@ any wiring.
   this field every time the operator applies a change, so the system always
   boots back into whichever mode was last explicitly selected.
 
-## Why a separate component
+## WiFi service as a daemon
 
 `gui/` is intended to run inside a Docker container, so it shouldn't be
 operating with root privileges or reaching into host-level NetworkManager
