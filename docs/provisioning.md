@@ -4,13 +4,17 @@ Step-by-step setup for a fresh Arduino UNO Q running its stock Debian Linux
 image, with a shell already reachable (SSH, ADB, or a physical console) as
 the board's default user (`arduino`). Every step runs on the board's own
 Debian Linux shell regardless of what your own computer runs, except
-[step 5](#5-flash-the-mcu-sketch), which runs on your development computer
-and has separate Linux/macOS and Windows instructions.
+[step 5](#5-flash-the-mcu-sketch) (runs on your development computer, with
+separate Linux/macOS and Windows instructions) and half of
+[step 9](#9-set-up-the-gui-as-a-docker-service) (the Docker image build,
+which also runs on a dev machine, not the board - see
+[`docker/README.md`](../docker/README.md) for why).
 
-Internet access on the board is required to complete this setup (installing
-`uv`, cloning the repository, and resolving Python/Arduino dependencies all
-reach out to the network). A future release will provide a fully offline
-Docker image, removing this requirement entirely.
+Internet access is required to complete this setup - on the board for
+installing `uv`, cloning the repository, and resolving Python/Arduino
+dependencies, and on the dev machine for the Docker build step above. Every
+piece provisioned here runs fully offline afterward - including the GUI's
+Docker container, which needs no network access on the board at all.
 
 ## 1. Prerequisites
 
@@ -167,6 +171,10 @@ LED/matrix indicators).
 
 ## 8. Run the GUI
 
+For local development/debugging - a provisioned field system instead runs the
+GUI as a Docker service, [step 9](#9-set-up-the-gui-as-a-docker-service)
+below.
+
 ```bash
 cd ~/Gits/RIID-gui/gui
 uv run main.py
@@ -185,11 +193,43 @@ hostname -I
 Then open `http://<board-ip>:8080` (or `http://<tailscale-hostname>:8080`
 if reachable over Tailscale) from that other device.
 
-## 9. Verify the full system
+## 9. Set up the GUI as a Docker service
 
-- GUI loads at `http://<board-ip>:8080` from another device on the network
-  (shows a "hardware disconnected" banner if no DAQ board is attached yet -
-  the rest of the interface still works).
+Building and installing are two separate steps on two different machines -
+see [`docker/README.md`](../docker/README.md) for the full explanation (the
+board's storage is usually too tight for a build's transient disk needs, even
+though the final image comfortably fits).
+
+On a dev machine (not the board):
+
+```bash
+cd docker
+./build.sh
+```
+
+Fetches every `uv` dependency (the only step here needing internet access)
+and produces `docker/riid-gui.tar`. Copy that file, `install.sh`, and
+`riid-gui.service` to the board (e.g. into this same `~/Gits/RIID-gui/docker/`
+checkout), then on the board:
+
+```bash
+cd ~/Gits/RIID-gui/docker
+sudo ./install.sh
+```
+
+Loads the image and installs/starts it as a systemd service that starts on
+boot and runs fully offline from then on - the primary way to deploy a
+provisioned field system. Once running, the GUI is reachable at
+`http://<board-ip>` on port 80 instead of step 8's `:8080` - stop step 8's
+manual `uv run main.py` first if it's still running, since both would
+otherwise fight over the DAQ board's serial port.
+
+## 10. Verify the full system
+
+- GUI loads from another device on the network at `http://<board-ip>` (port
+  80, via the Docker service from step 9) or `http://<board-ip>:8080` (via
+  step 8's manual `uv run main.py`) - shows a "hardware disconnected" banner
+  if no DAQ board is attached yet, the rest of the interface still works.
 - The LED matrix scrolls status text; LED4 reflects the GUI's current state
   (blue/red/green/purple).
 - LED3 shows red (Access Point mode, the default) or white (Station mode).

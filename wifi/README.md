@@ -57,10 +57,12 @@ any wiring.
   shows the text `AP MODE` for a while.
 
   > **Connecting to the system in AP mode:** join the broadcast SSID, then
-  > browse to **`http://10.42.0.1:8080`** - the fixed gateway address
+  > browse to **`http://10.42.0.1`** - the fixed gateway address
   > NetworkManager's `ipv4.method=shared` (see
   > [`nm-templates/riid-ap.nmconnection.template`](nm-templates/riid-ap.nmconnection.template))
-  > always assigns itself in AP mode. There is no mDNS/Tailscale name to rely
+  > always assigns itself in AP mode - on port 80 for a Dockerized deployment
+  > (see [`../docker/README.md`](../docker/README.md)) or `:8080` for a
+  > bare-metal `uv run main.py` one. There is no mDNS/Tailscale name to rely
   > on here, since the system isn't on any external network in this mode.
   > Until changed via the Network Setup card, the default SSID is
   > **`IAEA_RIID_SYSXX`** (`SYSXX` = this system's own `SYS-ID`) with
