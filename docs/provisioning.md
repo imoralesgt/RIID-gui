@@ -4,13 +4,15 @@ Step-by-step setup for a fresh Arduino UNO Q running its stock Debian Linux
 image, with a shell already reachable (SSH, ADB, or a physical console) as
 the board's default user (`arduino`). Every step runs on the board's own
 Debian Linux shell regardless of what your own computer runs, except
-[step 5](#5-flash-the-mcu-sketch), which runs on your development computer
-and has separate Linux/macOS and Windows instructions.
+[step 5](#5-flash-the-mcu-sketch), which runs on your development computer,
+with separate Linux/macOS and Windows instructions.
 
-Internet access on the board is required to complete this setup (installing
-`uv`, cloning the repository, and resolving Python/Arduino dependencies all
-reach out to the network). A future release will provide a fully offline
-Docker image, removing this requirement entirely.
+Internet access on the board is required to complete this setup - installing
+`uv`, cloning the repository, resolving Python/Arduino dependencies, and
+downloading the published GUI Docker image in
+[step 9](#9-set-up-the-gui-as-a-docker-service) all reach out to the network.
+Every piece provisioned here runs fully offline afterward - including the
+GUI's Docker container, which needs no network access to run.
 
 ## 1. Prerequisites
 
@@ -83,7 +85,7 @@ and the DAQ `python-api` submodule).
 ## 5. Flash the MCU sketch
 
 > **Run this step on your development computer, not on the UNO Q itself.**
-> Compiling on the UNO Q's own Linux side is not supported: its installed
+> Compiling on the UNO Q's Linux side is not supported: its installed
 > core version can differ from what's tested here, producing a build that
 > compiles without errors but isn't equivalent to the one this guide
 > verifies against.
@@ -167,13 +169,17 @@ LED/matrix indicators).
 
 ## 8. Run the GUI
 
+For local development/debugging - a provisioned field system instead runs the
+GUI as a Docker service, [step 9](#9-set-up-the-gui-as-a-docker-service)
+below.
+
 ```bash
 cd ~/Gits/RIID-gui/gui
 uv run main.py
 ```
 
 The GUI listens on all network interfaces, port 8080 - not just
-`localhost`. The board itself typically has no monitor/keyboard/mouse
+`localhost`. The board typically has no monitor/keyboard/mouse
 attached in the field, so access it from a browser on another device on
 the same network (lab computer, laptop, tablet) instead. Find the board's
 IP address:
@@ -185,11 +191,34 @@ hostname -I
 Then open `http://<board-ip>:8080` (or `http://<tailscale-hostname>:8080`
 if reachable over Tailscale) from that other device.
 
-## 9. Verify the full system
+## 9. Set up the GUI as a Docker service
 
-- GUI loads at `http://<board-ip>:8080` from another device on the network
-  (shows a "hardware disconnected" banner if no DAQ board is attached yet -
-  the rest of the interface still works).
+The board isn't meant to build this image itself - see
+[`docker/README.md`](../docker/README.md) for the full explanation (its
+storage is usually too tight for a build's transient disk needs, even though
+the final image comfortably fits). Download the latest published build from
+the repository's
+[Releases](https://github.com/imoralesgt/RIID-gui/releases) instead:
+
+```bash
+cd ~/Gits/RIID-gui/docker
+curl -LO https://github.com/imoralesgt/RIID-gui/releases/latest/download/riid-gui.tar
+sudo ./install.sh
+```
+
+Loads the image and installs/starts it as a systemd service that starts on
+boot and runs fully offline from then on - the primary way to deploy a
+provisioned field system. Once running, the GUI is reachable at
+`http://<board-ip>` on port 80 instead of step 8's `:8080` - stop step 8's
+manual `uv run main.py` first if it's still running, since both would
+otherwise fight over the DAQ board's serial port.
+
+## 10. Verify the full system
+
+- GUI loads from another device on the network at `http://<board-ip>` (port
+  80, via the Docker service from step 9) or `http://<board-ip>:8080` (via
+  step 8's manual `uv run main.py`) - shows a "hardware disconnected" banner
+  if no DAQ board is attached yet, the rest of the interface still works.
 - The LED matrix scrolls status text; LED4 reflects the GUI's current state
   (blue/red/green/purple).
 - LED3 shows red (Access Point mode, the default) or white (Station mode).

@@ -6,9 +6,9 @@ is the GUI's *Network Setup* card (Hardware & Calibration tab), which talks to
 this daemon over a local socket; a jumper cable wired to the MCU is a
 secondary, advanced/manual toggle for when the GUI isn't reachable - see
 [Hardware: wiring the jumper](#hardware-wiring-the-jumper) below. The daemon
-runs directly on the host (not inside a container) as its own systemd
+runs directly on the host (not inside a container) as a systemd
 service, independent of `gui/` — see
-[Why a separate component](#why-a-separate-component) below.
+[WiFi service as a daemon](#wifi-service-as-a-daemon) below.
 
 ## Hardware: wiring the jumper
 
@@ -57,10 +57,12 @@ any wiring.
   shows the text `AP MODE` for a while.
 
   > **Connecting to the system in AP mode:** join the broadcast SSID, then
-  > browse to **`http://10.42.0.1:8080`** - the fixed gateway address
+  > browse to **`http://10.42.0.1`** - the fixed gateway address
   > NetworkManager's `ipv4.method=shared` (see
   > [`nm-templates/riid-ap.nmconnection.template`](nm-templates/riid-ap.nmconnection.template))
-  > always assigns itself in AP mode. There is no mDNS/Tailscale name to rely
+  > always assigns itself in AP mode - on port 80 for a Dockerized deployment
+  > (see [`../docker/README.md`](../docker/README.md)) or `:8080` for a
+  > bare-metal `uv run main.py` one. There is no mDNS/Tailscale name to rely
   > on here, since the system isn't on any external network in this mode.
   > Until changed via the Network Setup card, the default SSID is
   > **`IAEA_RIID_SYSXX`** (`SYSXX` = this system's own `SYS-ID`) with
@@ -136,7 +138,7 @@ feature.
 ## Setup
 
 Requires Python 3, [`uv`](https://docs.astral.sh/uv/), and a Linux host
-running NetworkManager. This directory is its own standalone `uv` project
+running NetworkManager. This directory is a standalone `uv` project
 (a separate `pyproject.toml`/`uv.lock`, not part of the `gui`/`utils` `uv`
 workspace), with its own venv rather than using the system Python or
 gui/'s venv.

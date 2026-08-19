@@ -1,0 +1,24 @@
+.git/
+.github/
+.venv/
+.claude/
+
+# Generated/runtime state - not needed in the image, and the real board's
+# copies (persisted via the riid-gui-data volume / bind mounts) shouldn't be
+# shadowed by whatever a developer's local checkout happens to have.
+gui/gui.log
+gui/logs/
+gui/data/spectra/background/*
+gui/data/spectra/batch/*
+gui/data/spectra/riid/*
+!gui/data/spectra/**/.gitkeep
+# Gitignored dev-local WiFi cache - not real seed content, generated fresh
+# by the running app.
+gui/data/conf/wifi.json
+
+# Docs build output, not part of the running app
+gui/docs/reference/
+
+# Unrelated to the running gui/ service
+deprecated-ml-core/
+docs/res/
