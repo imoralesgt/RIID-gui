@@ -4,17 +4,15 @@ Step-by-step setup for a fresh Arduino UNO Q running its stock Debian Linux
 image, with a shell already reachable (SSH, ADB, or a physical console) as
 the board's default user (`arduino`). Every step runs on the board's own
 Debian Linux shell regardless of what your own computer runs, except
-[step 5](#5-flash-the-mcu-sketch) (runs on your development computer, with
-separate Linux/macOS and Windows instructions) and half of
-[step 9](#9-set-up-the-gui-as-a-docker-service) (the Docker image build,
-which also runs on a dev machine, not the board - see
-[`docker/README.md`](../docker/README.md) for why).
+[step 5](#5-flash-the-mcu-sketch), which runs on your development computer,
+with separate Linux/macOS and Windows instructions.
 
-Internet access is required to complete this setup - on the board for
-installing `uv`, cloning the repository, and resolving Python/Arduino
-dependencies, and on the dev machine for the Docker build step above. Every
-piece provisioned here runs fully offline afterward - including the GUI's
-Docker container, which needs no network access on the board at all.
+Internet access on the board is required to complete this setup - installing
+`uv`, cloning the repository, resolving Python/Arduino dependencies, and
+downloading the published GUI Docker image in
+[step 9](#9-set-up-the-gui-as-a-docker-service) all reach out to the network.
+Every piece provisioned here runs fully offline afterward - including the
+GUI's Docker container, which needs no network access to run.
 
 ## 1. Prerequisites
 
@@ -87,7 +85,7 @@ and the DAQ `python-api` submodule).
 ## 5. Flash the MCU sketch
 
 > **Run this step on your development computer, not on the UNO Q itself.**
-> Compiling on the UNO Q's own Linux side is not supported: its installed
+> Compiling on the UNO Q's Linux side is not supported: its installed
 > core version can differ from what's tested here, producing a build that
 > compiles without errors but isn't equivalent to the one this guide
 > verifies against.
@@ -181,7 +179,7 @@ uv run main.py
 ```
 
 The GUI listens on all network interfaces, port 8080 - not just
-`localhost`. The board itself typically has no monitor/keyboard/mouse
+`localhost`. The board typically has no monitor/keyboard/mouse
 attached in the field, so access it from a browser on another device on
 the same network (lab computer, laptop, tablet) instead. Find the board's
 IP address:
@@ -195,25 +193,16 @@ if reachable over Tailscale) from that other device.
 
 ## 9. Set up the GUI as a Docker service
 
-Building and installing are two separate steps on two different machines -
-see [`docker/README.md`](../docker/README.md) for the full explanation (the
-board's storage is usually too tight for a build's transient disk needs, even
-though the final image comfortably fits).
-
-On a dev machine (not the board):
-
-```bash
-cd docker
-./build.sh
-```
-
-Fetches every `uv` dependency (the only step here needing internet access)
-and produces `docker/riid-gui.tar`. Copy that file, `install.sh`, and
-`riid-gui.service` to the board (e.g. into this same `~/Gits/RIID-gui/docker/`
-checkout), then on the board:
+The board isn't meant to build this image itself - see
+[`docker/README.md`](../docker/README.md) for the full explanation (its
+storage is usually too tight for a build's transient disk needs, even though
+the final image comfortably fits). Download the latest published build from
+the repository's
+[Releases](https://github.com/imoralesgt/RIID-gui/releases) instead:
 
 ```bash
 cd ~/Gits/RIID-gui/docker
+curl -LO https://github.com/imoralesgt/RIID-gui/releases/latest/download/riid-gui.tar
 sudo ./install.sh
 ```
 

@@ -33,9 +33,13 @@ git submodule update --init --recursive
 
 ## Running the GUI
 
-**The Docker container is the default, recommended way to deploy the GUI** —
-an offline container that starts on boot, isolated from whatever else is
-installed on the host. See [`docker/README.md`](docker/README.md).
+**The Docker container is the recommended way to deploy the GUI** — an
+offline container that starts on boot, isolated from whatever else is
+installed on the host. Building and installing are separate steps on separate
+machines: boards load and run a pre-built image, published to the
+repository's [Releases](https://github.com/imoralesgt/RIID-gui/releases) as
+`riid-gui.tar` - they don't build it. See
+[`docker/README.md`](docker/README.md) for the exact steps.
 
 ### Advanced: running directly with `uv`
 
@@ -43,7 +47,7 @@ Skips the Docker image - runs the GUI straight from source with
 [uv](https://docs.astral.sh/uv/) managing the Python workspace (`gui`,
 `utils/spectrum_recorder`, and the DAQ `python-api` submodule are workspace
 members sharing one lockfile; `deprecated-ml-core/` is standalone and not
-part of it). `mcu/` is standalone too, keeping an Arduino sketch with its own
+part of it). `mcu/` is standalone too, keeping an Arduino sketch with an
 `arduino-cli`-based build/upload flow, unrelated to this `uv` workspace (see
 [`mcu/README.md`](mcu/README.md)). Requires Python 3.12+.
 
@@ -67,7 +71,7 @@ uv run main.py
 
 The server starts on **http://localhost:8080**. Open that URL in a browser to access the RIID system's interface. On startup, the backend automatically probes for a connected DAQ board over USB/serial; the GUI remains usable (with a clear "hardware disconnected" banner) even if no board is attached.
 
-The RIID system's onboard computer is an Arduino UNO Q board: its Linux domain (MPU) is where `gui/` and the WiFi mode daemon run, and the microcontroller domain (MCU) drives a physical RGB LED + LED matrix status display over an internal RPC bridge — see [Physical status display](#physical-status-display-arduino-uno-q) below. The MCU side needs its own one-time sketch flash (see [`mcu/README.md`](mcu/README.md)), not something `uv sync`/`uv run` sets up; if that sketch hasn't been flashed yet (e.g. during development on a different machine, before first provisioning), the GUI detects the RPC bridge is unreachable and simply skips those updates rather than failing.
+The RIID system's onboard computer is an Arduino UNO Q board: its Linux domain (MPU) is where `gui/` and the WiFi mode daemon run, and the microcontroller domain (MCU) drives a physical RGB LED + LED matrix status display over an internal RPC bridge — see [Physical status display](#physical-status-display-arduino-uno-q) below. The MCU side needs its own one-time sketch flash (see [`mcu/README.md`](mcu/README.md)), not something `uv sync`/`uv run` sets up; if that sketch hasn't been flashed yet (e.g. during development on a different machine, before first provisioning), the GUI detects the RPC bridge is unreachable and skips those updates rather than failing.
 
 ## GUI features
 
@@ -95,7 +99,7 @@ Batch/multi-run spectrum acquisition with experiment metadata:
 
 - **Radiation sources directory** — register/select radioactive sources (isotope, activity, reference date, type, form, distance, notes) from a persisted database, or append ad-hoc entries for the current run only.
 - **Shielding / absorber layers** — attach shielding material entries (element, thickness, notes) to the run; session-only, not persisted to a database.
-- **Batch recording** — configure live-time per run, number of runs, and a filename prefix, then start/stop an automated multi-run acquisition sequence. Live plot (with its own independent log-scale toggle), count-rate, and total-counts readouts update as each run completes.
+- **Batch recording** — configure live-time per run, number of runs, and a filename prefix, then start/stop an automated multi-run acquisition sequence. Live plot (with an independent log-scale toggle), count-rate, and total-counts readouts update as each run completes.
 
 ![Spectrum Recording tab: registered source and shielding layer alongside a completed batch run's spectrum](docs/res/spectrum_recording.png)
 
@@ -116,7 +120,7 @@ Bulk file management for everything the RIID system has written to disk, organiz
 
 ### Physical status display (Arduino UNO Q)
 
-Alongside the browser UI, the RIID system's Arduino UNO Q drives two onboard RGB LEDs and a 12x8 LED matrix as a physical status display, visible without a screen nearby. Both indicators are driven from the Linux side (where `gui/` and the WiFi daemon run) over an internal RPC bridge to a sketch on the microcontroller (MCU) side, which needs a one-time flash (see [`mcu/README.md`](mcu/README.md) for the firmware and full RPC protocol). If that sketch isn't flashed yet or the bridge is otherwise unreachable, the relevant software simply skips these updates rather than failing — useful during development, but not the expected state of a provisioned system.
+Alongside the browser UI, the RIID system's Arduino UNO Q drives two onboard RGB LEDs and a 12x8 LED matrix as a physical status display, visible without a screen nearby. Both indicators are driven from the Linux side (where `gui/` and the WiFi daemon run) over an internal RPC bridge to a sketch on the microcontroller (MCU) side, which needs a one-time flash (see [`mcu/README.md`](mcu/README.md) for the firmware and full RPC protocol). If that sketch isn't flashed yet or the bridge is otherwise unreachable, the relevant software skips these updates rather than failing — useful during development, but not the expected state of a provisioned system.
 
 #### LED4 — RIID operating status
 
@@ -172,8 +176,8 @@ seconds** switches between Station and Access Point. Every system boots into
 Access Point mode by default; if a Station connection repeatedly fails, it
 automatically falls back to Access Point mode instead (visibly, via the "STA
 FAILED" matrix message above). This whole feature — GUI card, jumper, LED3,
-and the AP/Station switch itself — is handled by a standalone daemon that the
-GUI talks to over a local socket, independent of `gui/`'s own process (see
+and the AP/Station switch — is handled by a standalone daemon that the
+GUI talks to over a local socket, independent of `gui/`'s process (see
 [`wifi/README.md`](wifi/README.md)).
 
 ## Machine learning model (RIID)
@@ -239,8 +243,8 @@ A class only counts as "detected" (surfaced in the Detected Isotopes metric card
 - **`keras-to-tflite.ipynb`** — converts a trained Keras model to TFLite (`TFLiteConverter` with default optimizations). Its retained output shows `cnn_deep`'s architecture as a 1-D CNN: three `[Conv1D → MaxPool1D → Dropout]` blocks (16 filters each) feeding a `Flatten → Dense(32) → Dropout → Dense(N classes)` head. That captured run is from an earlier 6-class snapshot (`bkg`/`co`/`coeu`/`cs`/`csco`/`eu`, 18,310 params, 28.6KB `.tflite`) — the final 9-class models actually shipped in `gui/ml_models/` are larger (~74KB each) and weren't re-exported through this notebook, so treat it as documenting the architecture *family*, not the exact final layer sizes.
 - **`preprocessing.py`** — the same feature-pipeline logic now in `gui/ml_preprocessing.py`, plus three exploratory variants not used in production: `preprocess_no_log` (no log scaling), `preprocess_baseline` (fixed-length raw normalization), and `preprocess_roi` (statistical features - max/sum/argmax/std/percentiles - extracted from predefined energy windows around each isotope's known photopeaks). `models/tflite/` correspondingly retains `roi.tflite`, `mlp_log.tflite`, `mlp_no_log.tflite`, `mlp_raw.tflite`, and `cnn_log.tflite` — alternative architectures/feature sets evaluated during model selection before settling on the CNN + log10-preprocessing combination that became `cnn_deep`/`cnn_multilabel`. Note its default crop is 20 bins, vs. 50 in the deployed `gui/ml_preprocessing.py` - a parameter that shifted between this R&D snapshot and the final production pipeline.
 - **`io_utils.py`** — spectrum file I/O for both `.spe` and `.json`, plus `resample_to_energy_grid`: since training spectra were collected across multiple detector units with different energy calibrations, it linearly interpolates every spectrum onto a shared 0-2047 keV, 1 keV/bin grid (area-conserving) before use, so the model sees a consistent energy axis regardless of which physical detector or calibration produced the data.
-- **`data/NML/`** — real single-isotope and mixture spectra recorded from actual DPP4SiPM hardware (Cs-137, Co-60, Ba-133, and combinations like Co-60+Cs-137 and Ba-133+Cs-137, at 5s and 30s live times) — used to validate the trained models against genuine detector output rather than only simulated/held-out training data.
-- **`inference.py` / `mcu.cpp` / README** — an early standalone deployment target (an Arduino Uno Q board over serial) for running inference outside the GUI entirely; superseded by the GUI's own `ml_inference.py` pipeline, kept here for reference.
+- **`data/NML/`** — real single-isotope and mixture spectra recorded from DPP4SiPM hardware (Cs-137, Co-60, Ba-133, and combinations like Co-60+Cs-137 and Ba-133+Cs-137, at 5s and 30s live times) — used to validate the trained models against genuine detector output rather than only simulated/held-out training data.
+- **`inference.py` / `mcu.cpp` / README** — an early standalone deployment target (an Arduino Uno Q board over serial) for running inference outside the GUI entirely; superseded by the GUI's `ml_inference.py` pipeline, kept here for reference.
 
 ## Generating the docs
 

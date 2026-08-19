@@ -1,14 +1,14 @@
 # Running the GUI as a Docker service
 
 Runs `gui/` as an offline Docker container that starts on boot, instead of the
-manual `cd gui && uv run main.py` used during development. Building and
-installing are two separate steps, run on two **different machines** - do not
-run both scripts on the same machine:
+manual `cd gui && uv run main.py` used during development. Boards aren't meant
+to build this image themselves - `docker/build.sh` and `docker/install.sh` are
+two separate scripts for two separate roles:
 
 | Script | Runs on | Does |
 |---|---|---|
-| **`docker/build.sh`** | **your dev machine** | Fetches every `uv` dependency and cross-builds a `linux/arm64` image (the Arduino UNO Q's architecture), then saves it to a portable tarball. This is the only step needing internet access or meaningful build-time disk space - the board's own root partition is often too tight for a build's transient peak (builder output + runtime base layers held simultaneously), even when the final image would comfortably fit. |
-| **`docker/install.sh`** | **the Arduino UNO Q board** | Loads the tarball `build.sh` already produced and installs/starts it as a systemd service. Needs no network access at all - everything the image needs is already inside the tarball. |
+| **`docker/build.sh`** | **a dev machine, or wherever builds get published from** | Fetches every `uv` dependency and cross-builds a `linux/arm64` image (the Arduino UNO Q's architecture), then saves it to a portable tarball. This is the only step needing internet access or meaningful build-time disk space - the board's root partition is often too tight for a build's transient peak (builder output + runtime base layers held simultaneously), even when the final image would comfortably fit. |
+| **`docker/install.sh`** | **the Arduino UNO Q board** | Loads a tarball (downloaded from the repository's [Releases](https://github.com/imoralesgt/RIID-gui/releases), normally - see [Installing on a board](#installing-on-a-board-run-on-the-board)) and installs/starts it as a systemd service. Needs no network access at all - everything the image needs is already inside the tarball. |
 
 See [Building](#building-run-on-your-dev-machine) and
 [Installing on a board](#installing-on-a-board-run-on-the-board) below for the
@@ -76,24 +76,36 @@ cd docker
 ./build.sh
 ```
 
-Produces `docker/riid-gui.tar` (a few hundred MB - compressed, so notably
-smaller than the image's unpacked size). No `sudo` needed here; this doesn't
+Produces `docker/riid-gui.tar` (a few hundred MB - compressed, so well under
+the image's unpacked size). No `sudo` needed here; this doesn't
 touch the dev machine's systemd/Docker service config at all. Next: copy that
 tarball to the board and continue with
 [Installing on a board](#installing-on-a-board-run-on-the-board) below.
 
 ## Installing on a board (run on the board)
 
-**Not your dev machine.** Copy the tarball, `install.sh`, and
-`riid-gui.service` to the board first (e.g. into its `~/Gits/RIID-gui/docker/`
-checkout):
+**Not your dev machine.** `install.sh` and `riid-gui.service` are already on
+the board as part of its `~/Gits/RIID-gui/docker/` checkout - only the image
+tarball itself needs to get there, and boards aren't meant to build that
+themselves (see [Building](#building-run-on-your-dev-machine) above). Get it
+one of two ways:
 
-```bash
-# From your dev machine, to the board:
-scp riid-gui.tar install.sh riid-gui.service arduino@<board>:~/Gits/RIID-gui/docker/
-```
+- **Download the latest published build** (the normal path) from the
+  repository's [Releases](https://github.com/imoralesgt/RIID-gui/releases) -
+  `riid-gui.tar` is attached there as a release asset:
+  ```bash
+  # On the board:
+  cd ~/Gits/RIID-gui/docker
+  curl -LO https://github.com/imoralesgt/RIID-gui/releases/latest/download/riid-gui.tar
+  ```
+- **Or copy one you built yourself** with `build.sh` (for a custom/local
+  build - not the normal path for a field deployment):
+  ```bash
+  # From your dev machine, to the board:
+  scp riid-gui.tar arduino@<board>:~/Gits/RIID-gui/docker/
+  ```
 
-Then, on the board itself:
+Either way, then on the board itself:
 
 ```bash
 # On the board:
@@ -139,10 +151,13 @@ the GUI itself rather than while the container is writing to them.
 
 ## Rebuilding after a code change
 
-Same two machines, same order as initial setup:
+Once a new build is published to [Releases](https://github.com/imoralesgt/RIID-gui/releases):
 
-1. **On your dev machine:** `./build.sh`.
-2. Copy the new `riid-gui.tar` to the board.
-3. **On the board:** `sudo docker/install.sh` (or just `docker load -i
-   riid-gui.tar` + `systemctl restart riid-gui.service`, without touching the
-   systemd unit again).
+1. **On the board:** download the new `riid-gui.tar` (overwriting the old
+   one), then `sudo docker/install.sh` (or just `docker load -i riid-gui.tar`
+   + `systemctl restart riid-gui.service`, without touching the systemd unit
+   again).
+
+For a custom/local build instead, same two machines as initial setup: `./build.sh`
+on your dev machine, copy the tarball over, then the same install step on the
+board.

@@ -6,9 +6,9 @@ is the GUI's *Network Setup* card (Hardware & Calibration tab), which talks to
 this daemon over a local socket; a jumper cable wired to the MCU is a
 secondary, advanced/manual toggle for when the GUI isn't reachable - see
 [Hardware: wiring the jumper](#hardware-wiring-the-jumper) below. The daemon
-runs directly on the host (not inside a container) as its own systemd
+runs directly on the host (not inside a container) as a systemd
 service, independent of `gui/` — see
-[Why a separate component](#why-a-separate-component) below.
+[WiFi service as a daemon](#wifi-service-as-a-daemon) below.
 
 ## Hardware: wiring the jumper
 
@@ -138,7 +138,7 @@ feature.
 ## Setup
 
 Requires Python 3, [`uv`](https://docs.astral.sh/uv/), and a Linux host
-running NetworkManager. This directory is its own standalone `uv` project
+running NetworkManager. This directory is a standalone `uv` project
 (a separate `pyproject.toml`/`uv.lock`, not part of the `gui`/`utils` `uv`
 workspace), with its own venv rather than using the system Python or
 gui/'s venv.
