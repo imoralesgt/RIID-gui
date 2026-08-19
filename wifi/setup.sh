@@ -107,8 +107,10 @@ if [[ -z "$uv_bin" ]]; then
 fi
 # .venv may be left over from an earlier/interrupted run and no longer
 # contain a working interpreter - uv sync refuses to reuse it in that case
-# instead of rebuilding it, so clear it first to keep this script unable
-# to execute.
+# instead of rebuilding it, so clear it first to keep this script idempotent
+# regardless of prior state. Removed as root (this script already requires
+# it): a previous root-run attempt can leave root-owned files inside that
+# the invoking user has no permission to delete.
 rm -rf "$SCRIPT_DIR/.venv"
 echo "Running 'uv sync' as $SUDO_USER..."
 run_as_user "$uv_bin" sync --project "$SCRIPT_DIR"

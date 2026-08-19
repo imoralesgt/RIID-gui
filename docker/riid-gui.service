@@ -1,0 +1,25 @@
+[Unit]
+Description=RIID GUI (Docker)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/arduino/Gits/RIID-gui
+ExecStartPre=-/usr/bin/docker rm -f riid-gui
+ExecStart=/usr/bin/docker run --rm --name riid-gui \
+    -p 80:8080 \
+    --privileged -v /dev:/dev \
+    -v /var/run/arduino-router.sock:/var/run/arduino-router.sock \
+    -v /var/run/riid-wifi.sock:/var/run/riid-wifi.sock \
+    -v riid-gui-data:/app/gui/data \
+    -v /home/arduino/Gits/RIID-gui/gui/logs:/app/gui/logs \
+    -v /home/arduino/Gits/RIID-gui/gui/gui.log:/app/gui/gui.log \
+    riid-gui:local
+ExecStop=/usr/bin/docker stop riid-gui
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
