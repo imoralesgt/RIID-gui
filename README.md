@@ -41,6 +41,17 @@ repository's [Releases](https://github.com/imoralesgt/RIID-gui/releases) as
 `riid-gui.tar` - they don't build it. See
 [`docker/README.md`](docker/README.md) for the exact steps.
 
+For provisioning a fresh board, `sudo ./install.sh` from the repository root
+downloads and installs the Docker service above together with the WiFi mode
+daemon ([`wifi/README.md`](wifi/README.md)) in one pass - see
+[`docs/provisioning.md`](docs/provisioning.md) for the full walkthrough. It
+doesn't flash the MCU sketch - that's a separate, optional step run from a
+development computer (see
+[Physical status display](#physical-status-display-arduino-uno-q) below and
+[`docs/provisioning.md`](docs/provisioning.md) step 5), needed for the
+LED/matrix status display and the manual jumper AP/STA toggle, not for the
+GUI or WiFi daemon themselves.
+
 ### Advanced: running directly with `uv`
 
 Skips the Docker image - runs the GUI straight from source with

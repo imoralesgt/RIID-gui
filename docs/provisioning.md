@@ -11,8 +11,32 @@ Internet access on the board is required to complete this setup - installing
 `uv`, cloning the repository, resolving Python/Arduino dependencies, and
 downloading the published GUI Docker image in
 [step 9](#9-set-up-the-gui-as-a-docker-service) all reach out to the network.
-Every piece provisioned here runs fully offline afterward - including the
+Every piece provisioned here runs offline afterward - including the
 GUI's Docker container, which needs no network access to run.
+
+After [step 3](#3-clone-the-repository) (cloning the repository), steps 2, 9,
+and 7 - installing `uv`, the GUI Docker service, and the WiFi mode daemon, in
+that order - can be done in one pass with:
+
+```bash
+cd ~/Gits/RIID-gui
+sudo ./install.sh
+```
+
+`--with-wifi`/`--skip-wifi` skip its interactive WiFi prompt, for scripted
+use. It downloads the GUI image from Releases first, while the board's
+existing network connection is still up, and only then sets up the WiFi
+daemon - restarting it applies Access Point mode immediately, which can drop
+that connection if WiFi is this board's only network path. See
+[`README.md`](../README.md#running-the-gui), [`docker/README.md`](../docker/README.md),
+and [`wifi/README.md`](../wifi/README.md) for what each piece does. It does
+**not** flash the MCU sketch ([step 5](#5-flash-the-mcu-sketch)) - that step
+runs on a separate development computer, not the board, so it stays manual;
+the GUI and WiFi daemon both work without it, but the LED4/LED3/LED
+matrix physical status display and the manual jumper-wire AP/STA toggle
+([step 6](#6-wire-the-wifi-mode-jumper-optional)) need it. The numbered steps
+below remain the way to do any one of these individually, or to understand
+and troubleshoot what each does.
 
 ## 1. Prerequisites
 
@@ -207,7 +231,7 @@ sudo ./install.sh
 ```
 
 Loads the image and installs/starts it as a systemd service that starts on
-boot and runs fully offline from then on - the primary way to deploy a
+boot and runs offline from then on - the primary way to deploy a
 provisioned field system. Once running, the GUI is reachable at
 `http://<board-ip>` on port 80 instead of step 8's `:8080` - stop step 8's
 manual `uv run main.py` first if it's still running, since both would
