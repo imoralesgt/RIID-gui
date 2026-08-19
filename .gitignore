@@ -223,3 +223,6 @@ gui/data/conf/wifi.json
 # Streamlit
 .streamlit/secrets.toml
 .claude
+
+# Docker images (built on dev machine)
+riid-gui.tar
