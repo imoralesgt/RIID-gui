@@ -121,6 +121,10 @@ checkout, and starts it. Re-running it (after copying a freshly rebuilt
 tarball over) is safe: loads the new image and restarts the service with it -
 the `riid-gui-data` volume is untouched either way.
 
+`../install.sh` (repo root) runs this together with the WiFi mode daemon in
+one pass, for provisioning a fresh board - see
+[`docs/provisioning.md`](../docs/provisioning.md).
+
 > **If the board's root partition is still too small for the loaded image**
 > (e.g. the UNO Q's factory layout splits a small root partition from a much
 > larger, separate `/home/<user>` one) - relocating Docker's entire data-root
