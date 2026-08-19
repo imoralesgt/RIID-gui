@@ -114,9 +114,10 @@ Bulk file management for everything the RIID system has written to disk, organiz
 - **Instrument identity** — system ID, analyzer model name, detector type/geometry/size/serial number.
 - **Energy calibration** — quadratic calibration coefficients (`a0`, `a1`, `a2`) mapping ADC channel to energy (keV).
 - **Advanced MCA/DPP settings** — VGA gain, channel smoothing, shaper peaking/flat-top times, detector rise/decay time constants, baseline restorer threshold gain, and pulse polarity inversion.
-- **Commit** — persists the profile (keyed by the board's serial number) and pushes the DPP parameters down to the physical board.
+- **Commit Detector/MCA Settings** — persists the profile (keyed by the board's serial number) and pushes the DPP parameters down to the physical board.
+- **Network Setup** — switches the system's WiFi between Access Point and Station mode. Station mode manages a list of known networks (scan for nearby ones, or add an SSID/passphrase by hand) and which one to connect to; Access Point mode sets this system's broadcast name and passphrase. Applying a change shows a warning, then a confirmation of the new settings, before taking effect.
 
-![Hardware & Calibration tab: instrument identity, energy calibration coefficients, and advanced MCA/DPP settings](docs/res/hardware_calibration.png)
+![Hardware & Calibration tab: instrument identity, energy calibration coefficients, advanced MCA/DPP settings, and Network Setup](docs/res/hardware_calibration.png)
 
 ### Physical status display (Arduino UNO Q)
 
