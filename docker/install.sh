@@ -83,7 +83,11 @@ install -m 644 "$unit_tmp" /etc/systemd/system/riid-gui.service
 echo "Installed /etc/systemd/system/riid-gui.service"
 
 systemctl daemon-reload
-systemctl enable --now riid-gui.service
+systemctl enable riid-gui.service
+# 'restart' alone starts it whether this is a fresh install or a re-run
+# picking up a freshly loaded image - 'enable --now' followed by 'restart'
+# fires two overlapping start attempts back to back, racing the container
+# name on a first-ever install.
 systemctl restart riid-gui.service
 
 echo

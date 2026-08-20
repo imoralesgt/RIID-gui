@@ -33,19 +33,19 @@ git submodule update --init --recursive
 
 ## Running the GUI
 
-**The Docker container is the recommended way to deploy the GUI** — an
-offline container that starts on boot, isolated from whatever else is
-installed on the host. Building and installing are separate steps on separate
-machines: boards load and run a pre-built image, published to the
-repository's [Releases](https://github.com/imoralesgt/RIID-gui/releases) as
-`riid-gui.tar` - they don't build it. See
-[`docker/README.md`](docker/README.md) for the exact steps.
+**The recommended way to run the GUI is as a Docker container**, started on
+boot as a systemd service. Building and installing happen on separate
+machines: boards load a pre-built image rather than building it themselves,
+published to the repository's
+[Releases](https://github.com/imoralesgt/RIID-gui/releases) as
+`riid-gui.tar`. See [`docker/README.md`](docker/README.md) for the exact
+steps.
 
-For provisioning a fresh board, `sudo ./install.sh` from the repository root
-downloads and installs the Docker service above together with the WiFi mode
-daemon ([`wifi/README.md`](wifi/README.md)) in one pass - see
-[`docs/provisioning.md`](docs/provisioning.md) for the full walkthrough. It
-doesn't flash the MCU sketch - that's a separate, optional step run from a
+On a fresh board, `sudo ./install.sh` (repository root) installs that Docker
+service and, optionally, the WiFi mode daemon
+([`wifi/README.md`](wifi/README.md)) - see
+[`docs/provisioning.md`](docs/provisioning.md) for the full steps. It doesn't
+flash the MCU sketch - that's a separate, optional step run from a
 development computer (see
 [Physical status display](#physical-status-display-arduino-uno-q) below and
 [`docs/provisioning.md`](docs/provisioning.md) step 5), needed for the

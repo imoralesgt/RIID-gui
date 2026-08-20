@@ -63,7 +63,10 @@ echo
 GUI_TAR="$SCRIPT_DIR/docker/riid-gui.tar"
 if [[ ! -f "$GUI_TAR" ]]; then
     echo "Downloading the latest published GUI image from GitHub Releases..."
-    curl -L -o "$GUI_TAR" \
+    # -f: fail loudly on a non-2xx response (e.g. a private repo rejecting an
+    # unauthenticated request) instead of writing the error page to $GUI_TAR
+    # and only finding out minutes later when 'docker load' rejects it.
+    curl -fL -o "$GUI_TAR" \
         https://github.com/imoralesgt/RIID-gui/releases/latest/download/riid-gui.tar
 fi
 "$SCRIPT_DIR/docker/install.sh" "$GUI_TAR"

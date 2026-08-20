@@ -27,7 +27,11 @@ sudo ./install.sh
 use. It downloads the GUI image from Releases first, while the board's
 existing network connection is still up, and only then sets up the WiFi
 daemon - restarting it applies Access Point mode immediately, which can drop
-that connection if WiFi is this board's only network path. See
+that connection if WiFi is this board's only network path. If
+`docker/riid-gui.tar` is already there - built locally with
+[`docker/build.sh`](../docker/build.sh) and copied over, or downloaded from
+[Releases](https://github.com/imoralesgt/RIID-gui/releases) by hand - it uses
+that instead of downloading it again. See
 [`README.md`](../README.md#running-the-gui), [`docker/README.md`](../docker/README.md),
 and [`wifi/README.md`](../wifi/README.md) for what each piece does. It does
 **not** flash the MCU sketch ([step 5](#5-flash-the-mcu-sketch)) - that step
@@ -229,6 +233,11 @@ cd ~/Gits/RIID-gui/docker
 curl -LO https://github.com/imoralesgt/RIID-gui/releases/latest/download/riid-gui.tar
 sudo ./install.sh
 ```
+
+If that download doesn't work, build the image on a dev machine instead with
+[`docker/build.sh`](../docker/build.sh) and copy the resulting `riid-gui.tar`
+here before running `install.sh` - see
+[`docker/README.md`](../docker/README.md#building-run-on-your-dev-machine).
 
 Loads the image and installs/starts it as a systemd service that starts on
 boot and runs offline from then on - the primary way to deploy a
