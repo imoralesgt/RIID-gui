@@ -157,6 +157,13 @@ installs the `/etc/sudoers.d/riid-wifi` rule and the
 starts the daemon. Re-running it is safe: existing config values are offered
 as defaults, and the service is reinstalled/restarted with the new values.
 
+`../install.sh` (repo root) runs this together with the Docker GUI service in
+one pass, for provisioning a fresh board - see
+[`docs/provisioning.md`](../docs/provisioning.md). Running `setup.sh` here
+directly still makes sense for a standalone/partial setup, e.g. a
+laptop/desktop dev machine where reconfiguring the WiFi adapter isn't
+wanted.
+
 > **Note:** restarting the daemon applies `mode` from
 > `config/wifi_config.json` immediately (defaulting to Access Point on a
 > fresh setup). If this system's only network path is the WiFi interface

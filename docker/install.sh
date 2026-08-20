@@ -62,6 +62,15 @@ run_as_user() {
 run_as_user mkdir -p "$REPO_DIR/gui/logs"
 run_as_user touch "$REPO_DIR/gui/gui.log"
 
+# Same problem for the WiFi daemon's socket: on a fresh board this hasn't
+# been set up yet, so nothing has bound /var/run/riid-wifi.sock. A directory
+# there instead of a plain file breaks the daemon's own startup later (it
+# does os.remove() then bind(), and os.remove() on a directory raises
+# IsADirectoryError) - touch a placeholder so Docker mounts a file.
+if [[ ! -e /var/run/riid-wifi.sock ]]; then
+    touch /var/run/riid-wifi.sock
+fi
+
 # --- systemd service, pointed at this checkout ---
 unit_tmp="$(mktemp)"
 trap 'rm -f "$unit_tmp"' EXIT
@@ -74,7 +83,11 @@ install -m 644 "$unit_tmp" /etc/systemd/system/riid-gui.service
 echo "Installed /etc/systemd/system/riid-gui.service"
 
 systemctl daemon-reload
-systemctl enable --now riid-gui.service
+systemctl enable riid-gui.service
+# 'restart' alone starts it whether this is a fresh install or a re-run
+# picking up a freshly loaded image - 'enable --now' followed by 'restart'
+# fires two overlapping start attempts back to back, racing the container
+# name on a first-ever install.
 systemctl restart riid-gui.service
 
 echo

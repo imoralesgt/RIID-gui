@@ -139,7 +139,10 @@ install -m 644 "$unit_tmp" /etc/systemd/system/wifi-mode-switcher.service
 echo "Installed /etc/systemd/system/wifi-mode-switcher.service"
 
 systemctl daemon-reload
-systemctl enable --now wifi-mode-switcher.service
+systemctl enable wifi-mode-switcher.service
+# 'restart' alone starts it whether this is a fresh install or a re-run -
+# 'enable --now' followed by 'restart' fires two overlapping start attempts
+# back to back, racing the daemon's own state on a first-ever install.
 systemctl restart wifi-mode-switcher.service
 
 echo
