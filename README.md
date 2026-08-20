@@ -48,7 +48,7 @@ service and, optionally, the WiFi mode daemon
 flash the MCU sketch - that's a separate, optional step run from a
 development computer (see
 [Physical status display](#physical-status-display-arduino-uno-q) below and
-[`docs/provisioning.md`](docs/provisioning.md) step 5), needed for the
+[`docs/provisioning.md`](docs/provisioning.md) step 4), needed for the
 LED/matrix status display and the manual jumper AP/STA toggle, not for the
 GUI or WiFi daemon themselves.
 

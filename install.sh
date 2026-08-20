@@ -124,7 +124,7 @@ else
 fi
 echo "The MCU sketch (LED4/LED3/matrix status display, manual jumper AP/STA"
 echo "toggle) is separate and optional, flashed from a dev computer - see"
-echo "docs/provisioning.md step 5. Not required for the GUI or WiFi daemon"
+echo "docs/provisioning.md step 4. Not required for the GUI or WiFi daemon"
 echo "above."
 echo "See docker/README.md and wifi/README.md for troubleshooting either"
 echo "piece individually."
