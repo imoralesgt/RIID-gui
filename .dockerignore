@@ -22,3 +22,6 @@ gui/docs/reference/
 # Unrelated to the running gui/ service
 deprecated-ml-core/
 docs/res/
+
+# Previously pre-built images
+docker/*.tar
