@@ -172,4 +172,6 @@ WIFI_DEFAULTS = {
 
 # Local Unix socket the WiFi daemon listens on for GUI requests (get_state /
 # scan_networks / apply_config) - see wifi/wifi_mode_daemon.py's GuiSocketServer.
-WIFI_SOCKET_PATH = "/var/run/riid-wifi.sock"
+# Lives in its own directory so Docker bind-mounts the directory rather than
+# this file directly - see GuiSocketServer.start()'s docstring for why.
+WIFI_SOCKET_PATH = "/var/run/riid-wifi/riid-wifi.sock"

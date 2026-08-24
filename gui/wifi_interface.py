@@ -1,6 +1,6 @@
 """Client for the WiFi daemon's local GUI-facing socket.
 
-wifi/wifi_mode_daemon.py exposes /var/run/riid-wifi.sock using the same
+wifi/wifi_mode_daemon.py exposes /var/run/riid-wifi/riid-wifi.sock using the same
 msgpack-rpc framing gui/mcu_interface.py already uses for the Arduino RPC
 bridge (`[0, msgid, method, args]` request / `[1, msgid, error, result]`
 response). `WifiInterface` is this GUI's thin client for it, used by

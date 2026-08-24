@@ -25,10 +25,16 @@ exact commands for each.
   `/app` (source + `.venv`) over and runs `python main.py` directly, no `uv`
   involved at runtime.
 - **The container needs the same three things bare-metal `gui/` needs**:
-  - `/var/run/arduino-router.sock` and `/var/run/riid-wifi.sock`, bind-mounted
-    straight through - the GUI is only ever a client on these, so this is
-    exactly the same pattern already used for the WiFi daemon's own socket
-    (see [`../wifi/README.md`](../wifi/README.md)).
+  - `/var/run/arduino-router.sock`, bind-mounted straight through - the GUI
+    is only ever a client on it.
+  - `/var/run/riid-wifi/`, the WiFi daemon's socket's *containing directory*,
+    bind-mounted rather than the socket file (`riid-wifi.sock`) inside it
+    directly - a single-file bind mount pins whatever inode exists at
+    container-start time, so a later daemon restart (which unlinks and
+    recreates that file) would leave the container holding a dead reference
+    instead of the new socket. A directory mount reflects the directory's
+    contents live, so a daemon restart is picked up immediately. See
+    [`../wifi/README.md`](../wifi/README.md).
   - The DAQ board's USB-serial device, hot-plugged and enumerated dynamically
     (`/dev/ttyUSB*`/`/dev/ttyACM*` via `/dev/serial/by-id/` - see
     `daq-core/NSIL-MCA-DPP4SiPM/sw/python-api/core/daq_hw.py`). The container

@@ -12,7 +12,7 @@ ExecStart=/usr/bin/docker run --rm --name riid-gui \
     -p 80:8080 \
     --privileged -v /dev:/dev \
     -v /var/run/arduino-router.sock:/var/run/arduino-router.sock \
-    -v /var/run/riid-wifi.sock:/var/run/riid-wifi.sock \
+    -v /var/run/riid-wifi:/var/run/riid-wifi \
     -v riid-gui-data:/app/gui/data \
     -v /home/arduino/Gits/RIID-gui/gui/logs:/app/gui/logs \
     -v /home/arduino/Gits/RIID-gui/gui/gui.log:/app/gui/gui.log \
