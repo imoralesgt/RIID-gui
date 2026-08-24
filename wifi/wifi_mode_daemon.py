@@ -21,7 +21,11 @@ import time
 import msgpack
 
 SOCKET_PATH = "/var/run/arduino-router.sock"
-GUI_SOCKET_PATH = "/var/run/riid-wifi.sock"
+# Lives in its own directory (not directly under /var/run) so the directory,
+# not the socket file itself, is what gets bind-mounted into the GUI's
+# Docker container - see GuiSocketServer.start() for why that distinction
+# matters.
+GUI_SOCKET_PATH = "/var/run/riid-wifi/riid-wifi.sock"
 _WIFI_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(_WIFI_DIR, "config", "wifi_config.json")
 SWITCH_SCRIPT = os.path.join(_WIFI_DIR, "scripts", "switch_wifi_mode.sh")
@@ -171,7 +175,24 @@ class GuiSocketServer:
         }
 
     def start(self):
-        """Binds the socket and starts the background accept-loop thread."""
+        """Binds the socket and starts the background accept-loop thread.
+
+        Recreates the socket file's containing directory first (`/var/run`
+        is a tmpfs, cleared on every reboot). Docker bind-mounts that
+        directory - not this file directly - into the GUI's container: a
+        single-file bind mount pins the specific inode present at container
+        start, so a later daemon restart's unlink-and-rebind here would
+        leave the container holding a dead reference (`ECONNREFUSED`)
+        instead of the new socket. A directory mount reflects this
+        directory's contents live, so a restart here is picked up
+        immediately on the container side too.
+        """
+        socket_dir = os.path.dirname(self.socket_path)
+        os.makedirs(socket_dir, exist_ok=True)
+        # Explicit, regardless of umask - the container's non-root user
+        # needs execute permission on this directory to reach the socket
+        # file inside it (the file itself is chmod'd separately below).
+        os.chmod(socket_dir, 0o755)
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

@@ -62,14 +62,15 @@ run_as_user() {
 run_as_user mkdir -p "$REPO_DIR/gui/logs"
 run_as_user touch "$REPO_DIR/gui/gui.log"
 
-# Same problem for the WiFi daemon's socket: on a fresh board this hasn't
-# been set up yet, so nothing has bound /var/run/riid-wifi.sock. A directory
-# there instead of a plain file breaks the daemon's own startup later (it
-# does os.remove() then bind(), and os.remove() on a directory raises
-# IsADirectoryError) - touch a placeholder so Docker mounts a file.
-if [[ ! -e /var/run/riid-wifi.sock ]]; then
-    touch /var/run/riid-wifi.sock
-fi
+# The WiFi daemon's socket lives in its own directory
+# (/var/run/riid-wifi/riid-wifi.sock), and that whole directory - not the
+# socket file directly - is what gets bind-mounted below. A directory bind
+# mount reflects the daemon recreating its socket file on every restart;
+# bind-mounting the file itself would instead pin whatever inode existed at
+# container-start time, silently going stale (ECONNREFUSED from inside the
+# container) the next time the daemon restarts. Create it here in case the
+# WiFi daemon hasn't been set up yet on this board.
+mkdir -p /var/run/riid-wifi
 
 # --- systemd service, pointed at this checkout ---
 unit_tmp="$(mktemp)"

@@ -22,17 +22,23 @@ any wiring.
 ## Software architecture
 
 - **GUI control (primary)**: `wifi_mode_daemon.py` listens on a second local
-  Unix socket, `/var/run/riid-wifi.sock`, using the same lightweight
-  msgpack-rpc framing as the Arduino RPC bridge below. `gui/wifi_interface.py`'s
-  `WifiInterface` is the GUI-side client, used by `gui/view_network.py`'s
-  Network Setup card. Three request methods: `get_state` (current mode, AP
-  SSID/passphrase, known Station networks, last switch outcome),
-  `scan_networks` (proxies an `nmcli` scan), and `apply_config` (writes new
-  settings to `config/wifi_config.json` and triggers the mode switch). The
-  GUI never touches `nmcli`, NetworkManager, or `sudo` itself - this socket is
-  the only channel through which it affects WiFi state, so it works the same
-  way whether the GUI runs directly on the host or, later, inside a Docker
-  container with no host network/root access.
+  Unix socket, `/var/run/riid-wifi/riid-wifi.sock`, using the same
+  lightweight msgpack-rpc framing as the Arduino RPC bridge below.
+  `gui/wifi_interface.py`'s `WifiInterface` is the GUI-side client, used by
+  `gui/view_network.py`'s Network Setup card. Three request methods:
+  `get_state` (current mode, AP SSID/passphrase, known Station networks,
+  last switch outcome), `scan_networks` (proxies an `nmcli` scan), and
+  `apply_config` (writes new settings to `config/wifi_config.json` and
+  triggers the mode switch). The GUI never touches `nmcli`, NetworkManager,
+  or `sudo` itself - this socket is the only channel through which it
+  affects WiFi state, so it works the same way whether the GUI runs directly
+  on the host or inside a Docker container with no host network/root access.
+  The socket lives in its own directory, rebuilt on every daemon start
+  (`GuiSocketServer.start()`), rather than directly under `/var/run` -
+  Docker bind-mounts that directory as a whole into the GUI container (see
+  [`../docker/README.md`](../docker/README.md)), so a daemon restart's
+  unlink-and-rebind is picked up immediately instead of leaving the
+  container holding a dead socket reference.
 - **Jumper control (advanced/manual)**: the jumper and the two RGB/matrix
   indicators live on the same UNO Q MCU sketch the GUI already drives
   (`mcu/app/riid_viz/riid_viz.ino`) — see [`mcu/README.md`](../mcu/README.md)
