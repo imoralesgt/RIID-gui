@@ -101,15 +101,21 @@ class NetworkSetupPanel:
         (e.g. loading state the daemon already has) - falls back to the
         whole string if it doesn't end with the current SYS-ID.
 
+        Strips every trailing occurrence, not just one: a value saved before
+        this stripping existed (or typed directly into `wifi/setup.sh`'s raw
+        prompt) can already contain the suffix once, and re-saving it back
+        then through `_composed_ap_ssid` without a full strip would keep
+        stacking another copy on each load/save round-trip.
+
         Args:
             full_ssid (str): A complete AP SSID, as stored by the daemon.
 
         Returns:
-            str: The customizable part, with the SYS-ID suffix removed.
+            str: The customizable part, with every SYS-ID suffix removed.
         """
         suffix = f"_{self._current_sys_id()}"
-        if full_ssid.endswith(suffix):
-            return full_ssid[: -len(suffix)]
+        while suffix and full_ssid.endswith(suffix):
+            full_ssid = full_ssid[: -len(suffix)]
         return full_ssid
 
     def _composed_ap_ssid(self, custom: str) -> str:
