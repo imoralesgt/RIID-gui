@@ -35,6 +35,14 @@ POLL_INTERVAL_S = 1.0
 # scroll fully across the matrix and stay legible before reverting.
 TRANSIENT_TEXT_MS = 20000
 
+# Gap between Station connection retries. Right after boot, NetworkManager
+# can take a moment to finish registering the WiFi device - nmcli fails with
+# "device lo not available" in the meantime, a red herring unrelated to the
+# actual (not-yet-ready) device. Retrying with no delay burns through every
+# attempt before that window closes, so max_sta_retries ends up providing no
+# real protection against exactly the failure it exists for.
+STA_RETRY_DELAY_S = 2.0
+
 # Slower than POLL_INTERVAL_S (which is tuned for jumper-button UX) so a
 # transient WiFi blip - AP reboot, DHCP renewal - doesn't trip a fallback.
 STA_CHECK_INTERVAL_S = 5.0
@@ -399,6 +407,8 @@ class WifiModeDaemon:
                 if announce:
                     self.push_transient_text(f"STA MODE: {ssid}")
                 return True
+            if attempt < max_retries:
+                time.sleep(STA_RETRY_DELAY_S)
 
         logger.warning("Station connection failed after %d attempts; falling back to AP mode.", max_retries)
         self.switch_to_ap(announce=False)
