@@ -922,7 +922,7 @@ class ControlPanelSidebar:
                 # background into a downloadable .zip (both in .json and .spe).
                 # Visible only once a background has settled (see refresh_widget_states).
                 with ui.row().classes('w-full gap-2 no-wrap mt-1'):
-                    self.download_riid_btn = ui.button('Download', icon='download', on_click=self.trigger_download_riid)
+                    self.download_riid_btn = ui.button('Download', icon='download', on_click=self.open_download_riid_dialog)
                     self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5 text-xs')
 
                     # Opens the offline-analysis file picker - same idle+has_bg
@@ -931,6 +931,7 @@ class ControlPanelSidebar:
                     self.load_spectrum_btn = ui.button('Offline', icon='folder_open', on_click=self.open_load_spectrum_dialog)
                     self.load_spectrum_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5 text-xs')
                 self._build_load_spectrum_dialog()
+                self._build_download_riid_modal()
 
             # ============ BACKGROUND SPECTRUM (collapsible) ============
             # Recording/loading/storing a background is a secondary, occasional
@@ -1186,14 +1187,34 @@ class ControlPanelSidebar:
         if was_offline:
             ui.notify("Switched to live survey mode", type="info")
 
-    def trigger_download_riid(self):
-        """Bundles the current RIID spectrum + background into a downloadable zip."""
+    def _build_download_riid_modal(self):
+        """Prompt dialog that asks for a file name (timestamp-prefixed
+        suggestion) before bundling the current RIID spectrum + background
+        into a downloadable zip."""
+        with ui.dialog() as self.download_riid_dialog, ui.card().classes('p-4 w-96 space-y-3'):
+            ui.label('Store and Download Spectrum').classes('text-sm font-bold text-blue-600')
+            self.riid_filename_input = ui.input('File Name').props('dense outlined').classes('w-full text-xs')
+            with ui.row().classes('w-full gap-2 pt-1'):
+                ui.button('Cancel', on_click=self.download_riid_dialog.close).props('dense outline').classes('flex-1')
+                ui.button('Download', icon='download', on_click=self.trigger_download_riid).props('dense color=primary').classes('flex-1')
+
+    def open_download_riid_dialog(self):
+        """Opens the store-and-download dialog, pre-filled with a
+        timestamp + serial number filename suggestion."""
         logger.warning("[USER_ACTION] Operator clicked Download Spectrum button.")
-        ok, msg, zip_bytes, base_filename = self.service.build_riid_download_zip()
+        default_name = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{self.service.system.serial_number}_riid"
+        self.riid_filename_input.set_value(default_name)
+        self.download_riid_dialog.open()
+
+    def trigger_download_riid(self):
+        """Bundles the current RIID spectrum + background into a downloadable
+        zip, under the file name entered in the store-and-download dialog."""
+        ok, msg, zip_bytes, base_filename = self.service.build_riid_download_zip(self.riid_filename_input.value)
         if not ok:
             ui.notify(msg, type="negative")
             return
         ui.notify(msg, type="positive")
+        self.download_riid_dialog.close()
         ui.download(zip_bytes, f"{base_filename}_bundle.zip", media_type='application/zip')
 
     def refresh_widget_states(self):
@@ -1358,6 +1379,7 @@ class ControlPanelSidebar:
         # in-progress/last-shown RIID spectrum together with the background is
         # exactly the point of this button.
         self.download_riid_btn.set_visibility(has_bg and not is_bg_running)
+        self.download_riid_btn.set_text('STORE AND DOWNLOAD' if is_survey_running else 'Download')
 
         # Load Spectrum - same idle+has_bg precondition load_offline_spectrum()
         # itself enforces; stays visible/usable while already in offline mode

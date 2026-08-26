@@ -1521,13 +1521,13 @@ class RIIDCoreService:
             logger.error(f"[SERVICE] Failed to save background spectrum: {e}", exc_info=True)
             return False, f"Failed to save background spectrum: {e}"
 
-    def build_riid_download_zip(self) -> tuple:
+    def build_riid_download_zip(self, filename: str) -> tuple:
         """Persists the current spectrum shown in the RIID view
-        (self.live_spectrum) to data/spectra/riid/ - genuinely written to disk,
-        named with the UTC timestamp of the moment this was called
-        - then bundles it together with the current background spectrum, both
-        in .json and .spe formats, into a single .zip for download.
-        
+        (self.live_spectrum) to data/spectra/riid/ under the given base
+        filename, then bundles it together with the current background
+        spectrum, both in .json and .spe formats, into a single .zip for
+        download.
+
         Only the RIID spectrum is persisted here. The background is NOT
         re-written to data/spectra/background/ - that already has its own
         explicit "Store Background Spectrum" action; re-saving it here on
@@ -1535,10 +1535,14 @@ class RIIDCoreService:
         It's serialized in-memory (via a throwaway temp file, reusing the
         already-tested _write_spe_file logic instead of duplicating it) purely
         for inclusion in this zip.
-        
+
+        Args:
+            filename (str): Desired base filename (without extension), as
+                chosen by the operator in the save prompt.
+
         Returns:
             (bool, str, bytes|None, str|None): (success, message, zip_bytes,
-            base_filename). base_filename is the UTC-timestamped name used for
+            base_filename). base_filename is the sanitized name used for
             both the persisted RIID files and the returned zip's contents, so
             the caller can name the downloaded zip consistently with what was
             actually saved to disk.
@@ -1547,13 +1551,13 @@ class RIIDCoreService:
             return False, "No spectrum currently shown in the RIID view.", None, None
         if not self.background_spectrum:
             return False, "No background spectrum available - record or load one first.", None, None
-        
+
+        safe_filename = "".join(c for c in str(filename or "").strip() if c.isalnum() or c in ("_", "-", "."))
+        if not safe_filename:
+            return False, "Enter a valid file name.", None, None
+
         time_now = datetime.now(timezone.utc)
-        # Same naming convention as the batch recording session
-        # ({timestamp}_{serial_number}_...) - just without the batch-specific
-        # prefix/run-index suffix, since a single RIID download has neither.
-        safe_filename = f"{time_now.strftime('%Y%m%d_%H%M%S')}_{self.system.serial_number}_riid"
-        
+
         try:
             os.makedirs(SPECTRA_RIID_DIR, exist_ok=True)
             riid_base = os.path.join(SPECTRA_RIID_DIR, safe_filename)
