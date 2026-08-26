@@ -56,28 +56,33 @@ True while a Spectrum ID tab activity is in progress - either an active survey o
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1513"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1534"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `build_riid_download_zip`
 
 ```python
-build_riid_download_zip() → tuple
+build_riid_download_zip(filename: str) → tuple
 ```
 
-Persists the current spectrum shown in the RIID view (self.live_spectrum) to data/spectra/riid/ - genuinely written to disk, named with the UTC timestamp of the moment this was called 
-- then bundles it together with the current background spectrum, both in .json and .spe formats, into a single .zip for download. 
+Persists the current spectrum shown in the RIID view (self.live_spectrum) to data/spectra/riid/ under the given base filename, then bundles it together with the current background spectrum, both in .json and .spe formats, into a single .zip for download. 
 
 Only the RIID spectrum is persisted here. The background is NOT re-written to data/spectra/background/ - that already has its own explicit "Store Background Spectrum" action; re-saving it here on every RIID download would silently pile up duplicate background files. It's serialized in-memory (via a throwaway temp file, reusing the already-tested _write_spe_file logic instead of duplicating it) purely for inclusion in this zip. 
 
 
 
+**Args:**
+ 
+ - <b>`filename`</b> (str):  Desired base filename (without extension), as  chosen by the operator in the save prompt. 
+
+
+
 **Returns:**
  
- - <b>`(bool, str, bytes|None, str|None)`</b>:  (success, message, zip_bytes, base_filename). base_filename is the UTC-timestamped name used for both the persisted RIID files and the returned zip's contents, so the caller can name the downloaded zip consistently with what was actually saved to disk. 
+ - <b>`(bool, str, bytes|None, str|None)`</b>:  (success, message, zip_bytes, base_filename). base_filename is the sanitized name used for both the persisted RIID files and the returned zip's contents, so the caller can name the downloaded zip consistently with what was actually saved to disk. 
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1799"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1906"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `build_spectra_zip`
 
@@ -102,7 +107,7 @@ Bundles the requested files from a data/spectra/ category folder into an in-memo
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1091"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1112"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `clear_cps_history`
 
@@ -114,7 +119,7 @@ Clears the count-rate plot's rolling history. Triggered by either its own dedica
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1916"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L2023"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `clear_survey_data`
 
@@ -126,7 +131,7 @@ Explicitly wipes the accumulated survey spectrum trace (and its associated timer
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1049"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1070"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `compute_background_subtracted_spectrum`
 
@@ -162,7 +167,7 @@ min_counts=0 (not the ML pipeline's own value of 20) - this call is purely for d
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1834"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1941"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `delete_spectra_files`
 
@@ -187,7 +192,7 @@ Permanently deletes the requested files from a data/spectra/ category folder, fo
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L438"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L447"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `initialize_and_probe`
 
@@ -199,7 +204,7 @@ Asynchronously discovers hardware on startup sequence.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1603"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1628"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `list_available_background_files`
 
@@ -211,7 +216,7 @@ Lists .json/.spe files available in the background spectra folder (data/spectra/
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1763"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1870"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `list_spectra_files`
 
@@ -236,7 +241,7 @@ Lists files available for bulk download in a data/spectra/ category folder.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1620"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1645"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `load_background_spectrum`
 
@@ -256,7 +261,34 @@ Loads a pre-recorded background spectrum from a .json or .spe file in data/spect
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L364"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1788"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+
+### <kbd>method</kbd> `load_offline_spectrum`
+
+```python
+load_offline_spectrum(category: str, filename: str) → tuple
+```
+
+Loads a pre-recorded spectrum from any data/spectra/ category (background, batch, or riid) and analyzes it as if it were the current live spectrum, instead of pulling from the DAQ board. 
+
+Reuses the same file parsers load_background_spectrum() does - the .json/.spe schema is shared across categories, only the meaning of the data differs. Requires a background to already be loaded, same precondition the live survey already enforces via the UI. 
+
+
+
+**Args:**
+ 
+ - <b>`category`</b> (str):  One of 'background', 'batch', 'riid'. 
+ - <b>`filename`</b> (str):  Bare filename (no path) within that category's folder. 
+
+
+
+**Returns:**
+ 
+ - <b>`(bool, str)`</b>:  (success, message) - message is a summary (potentially including a calibration-mismatch warning, same as load_background_spectrum) or an error description for the UI. 
+
+---
+
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L373"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `push_active_profile_to_board`
 
@@ -278,7 +310,7 @@ Returns True on success, False if programming was skipped or failed.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L323"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L332"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `reinitialize_daq_handle`
 
@@ -294,7 +326,7 @@ The timers_preset is fixed at the unsigned-32-bit ceiling (effectively unlimited
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1438"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1459"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `save_background_spectrum`
 
@@ -326,7 +358,7 @@ Persists the latest recorded background spectrum to disk, in JSON and/or SPE for
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L985"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1000"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `set_auto_hysteresis_enabled`
 
@@ -338,7 +370,7 @@ Toggles automatic mode for BOTH the hysteresis reset threshold and the ML trigge
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L999"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1014"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `set_manual_hysteresis_threshold`
 
@@ -350,7 +382,7 @@ Sets the operator's manual peak-single-channel-count threshold, used only while 
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L968"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L977"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `set_ml_classification_threshold`
 
@@ -362,7 +394,7 @@ Passthrough to MlInference.update_classification_threshold() - the entry point t
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L975"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L984"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `set_ml_min_counts`
 
@@ -372,9 +404,11 @@ set_ml_min_counts(new_min_counts: int)
 
 Directly sets MlInference's min_counts, called by the GUI's ML trigger slider - only ever shown/usable in manual mode (see auto_hysteresis_enabled), so this always applies immediately with no adaptation. In auto mode, the poll loop recomputes and applies the effective value itself every tick instead (see _compute_effective_ml_min_counts), and this slider isn't shown at all. 
 
+In offline mode there's no running survey loop to pick this change up on its own next tick, so classification is re-run immediately against the already-loaded spectrum instead. 
+
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1004"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1019"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `set_ml_model`
 
@@ -386,6 +420,8 @@ Swaps the active ML model at runtime (cnn_multilabel / cnn_deep). Reconstructs s
 
 Only meaningful while idle - the model choice affects what _execute_ml_pipeline() returns (including the label SET itself, since cnn_deep and cnn_multilabel have different classes), so switching mid-survey could produce a confusing mix of old- and new-model results. The GUI is expected to only enable this control while stopped, but this method also guards defensively. 
 
+In offline mode there's no running survey loop to pick this change up on its own next tick, so classification is re-run immediately against the already-loaded spectrum under the new model instead. 
+
 
 
 **Returns:**
@@ -394,7 +430,7 @@ Only meaningful while idle - the model choice affects what _execute_ml_pipeline(
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L314"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L323"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `set_state`
 
@@ -408,7 +444,7 @@ set_state(state_string: str) → None
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L490"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L499"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `start_background_recording`
 
@@ -420,7 +456,7 @@ Spawns background spectrum profiling worker task and purges stale arrays.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1205"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1226"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `start_batch_recording`
 
@@ -432,7 +468,7 @@ Assembles automated structural script loops mapping data files.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L638"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L647"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `start_continuous_survey`
 
@@ -446,7 +482,7 @@ Per the DPP4SiPM firmware docs, the $AQ start command (flags 0/1) unavoidably cl
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L455"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L464"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `start_service_loops`
 
@@ -458,7 +494,7 @@ Spawns long-running async background monitor workers.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1877"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1984"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `stop_execution`
 
@@ -470,7 +506,7 @@ Halts the active acquisition loop without discarding the collected spectrum. The
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L1963"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/riid_service.py#L2074"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `verify_runtime_hardware_safety`
 

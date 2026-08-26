@@ -27,7 +27,7 @@ App-startup hook: probes for hardware and starts the background service loops.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L367"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L383"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>function</kbd> `index`
 
@@ -72,7 +72,7 @@ Constructs the visual container tree utilizing official palettes.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L271"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/main.py#L272"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `global_ui_sync_tick`
 

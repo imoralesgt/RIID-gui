@@ -40,7 +40,7 @@ Builds the plot container's widgets and wires them to `service`.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L490"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L503"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_clear_cps_history`
 
@@ -52,7 +52,7 @@ Clears the count-rate plot's history and forces an immediate redraw.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L199"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L206"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_log_scale_change`
 
@@ -64,7 +64,7 @@ Toggles the live spectrum plot between linear and log count scale.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L157"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L160"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_model_change`
 
@@ -76,7 +76,7 @@ Switches the active ML model. Rebuilds the class probability bars for the new mo
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L171"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L174"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_viz_mode_change`
 
@@ -88,7 +88,7 @@ Switches between the two spectrum visualization templates - 'overlay' (backgroun
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L205"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L212"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `update_ui_elements`
 
@@ -101,14 +101,14 @@ Master orchestrator driving dynamic component layers stacking order and layout c
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L792"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L821"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>class</kbd> `ControlPanelSidebar`
 The Spectrum ID tab's Survey Control Console (right-hand sidebar). 
 
 Hosts every operator control for the live survey: ML model switch, detection threshold, hysteresis/trigger settings, background record/ load/save, and survey start/stop/clear/download. 
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L800"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L829"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `__init__`
 
@@ -130,7 +130,31 @@ Builds the sidebar's widgets.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1069"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1208"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+
+### <kbd>method</kbd> `open_download_riid_dialog`
+
+```python
+open_download_riid_dialog()
+```
+
+Opens the store-and-download dialog, pre-filled with a timestamp + serial number filename suggestion. 
+
+---
+
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1105"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+
+### <kbd>method</kbd> `open_load_spectrum_dialog`
+
+```python
+open_load_spectrum_dialog()
+```
+
+Refreshes every category's file list and opens the picker. 
+
+---
+
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1161"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `open_save_bg_dialog`
 
@@ -142,7 +166,7 @@ Opens the save-background dialog with a freshly-suggested filename.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1014"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1052"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `refresh_bg_file_list`
 
@@ -154,7 +178,7 @@ Repopulates the load-background dropdown from whatever's currently in data/spect
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1110"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1227"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `refresh_widget_states`
 
@@ -166,7 +190,7 @@ Monitors status variables and dynamically updates the panel metrics text strings
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L978"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1016"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_auto_hysteresis_toggle`
 
@@ -178,7 +202,7 @@ Switches automatic mode for BOTH the ML trigger threshold and the hysteresis res
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1009"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1047"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_bg`
 
@@ -190,7 +214,7 @@ Starts a fresh background recording for the configured duration.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1095"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1187"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_clear`
 
@@ -198,11 +222,11 @@ Starts a fresh background recording for the configured duration.
 trigger_clear()
 ```
 
-Wipes the accumulated survey spectrum, preserving the background. 
+Wipes the accumulated survey spectrum, preserving the background. Also the documented way out of offline analysis mode back to live survey - clear_survey_data() resets that flag too. 
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1100"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1216"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_download_riid`
 
@@ -210,11 +234,11 @@ Wipes the accumulated survey spectrum, preserving the background.
 trigger_download_riid()
 ```
 
-Bundles the current RIID spectrum + background into a downloadable zip. 
+Bundles the current RIID spectrum + background into a downloadable zip, under the file name entered in the store-and-download dialog. 
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1021"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1059"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_load_bg`
 
@@ -226,7 +250,19 @@ Loads the background spectrum selected in the dropdown.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1002"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1111"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+
+### <kbd>method</kbd> `trigger_load_offline_spectrum`
+
+```python
+trigger_load_offline_spectrum()
+```
+
+Loads whichever file is selected in the picker's active tab and switches into offline analysis mode. 
+
+---
+
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1040"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_manual_hysteresis_change`
 
@@ -238,7 +274,7 @@ Sets the operator's manual peak-single-channel-count threshold - only takes effe
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L970"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1008"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_min_counts_change`
 
@@ -250,7 +286,7 @@ Directly sets the ML pipeline's min_counts, live as the slider moves - only usab
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1076"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1168"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_play_stop_toggle`
 
@@ -262,7 +298,7 @@ Single control that starts a survey when idle, or halts it when running. STOP do
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1085"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1177"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_start`
 
@@ -274,7 +310,7 @@ Starts (or resumes) the continuous survey.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1090"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L1182"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_stop`
 
@@ -286,7 +322,7 @@ Stops the currently running survey/recording.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L961"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/view_spectrum_id.py#L999"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ### <kbd>method</kbd> `trigger_threshold_change`
 

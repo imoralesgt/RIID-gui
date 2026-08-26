@@ -56,7 +56,7 @@ Logs any otherwise-unhandled exception raised in a background worker thread.
 
 ---
 
-<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/config.py#L116"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
+<a href="https://github.com/imoralesgt/RIID-gui/blob/main/gui/config.py#L124"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>function</kbd> `get_rgba_fill`
 
