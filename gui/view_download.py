@@ -1,8 +1,8 @@
 """The Spectra Download tab: bulk file management for recorded spectra.
 
 :class:`SpectraDownloadPanel` renders one sub-tab per category (Background,
-Batch, RIID); each sub-tab is a :class:`_CategoryDownloadSection` handling
-that category's file picker, multi-select download, and delete.
+Batch records, Live survey); each sub-tab is a :class:`_CategoryDownloadSection`
+handling that category's file picker, multi-select download, and delete.
 """
 
 from datetime import datetime
@@ -15,11 +15,14 @@ class SpectraDownloadPanel:
     three data/spectra/ subfolders (background, batch, riid), each in its own
     tab with a "select all" checkbox and an extension filter."""
 
-    # (category key passed to the service, display label for the tab)
+    # (category key passed to the service - unchanged wire format used
+    # everywhere else, e.g. RIIDCoreService.SPECTRA_CATEGORY_DIRS - display
+    # label for the tab, which the offline-analysis picker in
+    # view_spectrum_id.py mirrors)
     CATEGORIES = [
         ('background', 'Background'),
-        ('batch', 'Batch'),
-        ('riid', 'RIID'),
+        ('batch', 'Batch records'),
+        ('riid', 'Live survey'),
     ]
 
     def __init__(self, service):

@@ -164,6 +164,11 @@ class RIIDCoreService:
         # Operational State Flags
         self.set_state('IDLE')
         self.is_hardware_available = False
+        # True while analyzing a loaded pre-recorded spectrum instead of live
+        # DAQ data - coexists with state == 'IDLE' rather than being a new
+        # state value, since it isn't a DAQ activity like the other three.
+        # Cleared by clear_survey_data() (the RESTART button).
+        self.offline_mode = False
         
         # Dynamic Spectrum Vector Storage Buffers
         self.live_spectrum = []
@@ -979,8 +984,14 @@ class RIIDCoreService:
         adaptation. In auto mode, the poll loop recomputes and applies the
         effective value itself every tick instead (see
         _compute_effective_ml_min_counts), and this slider isn't shown at
-        all."""
+        all.
+
+        In offline mode there's no running survey loop to pick this change
+        up on its own next tick, so classification is re-run immediately
+        against the already-loaded spectrum instead."""
         self.ml_inference.update_min_counts(int(new_min_counts))
+        if self.offline_mode and self.live_spectrum:
+            self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
 
     def set_auto_hysteresis_enabled(self, enabled: bool):
         """Toggles automatic mode for BOTH the hysteresis
@@ -1760,6 +1771,87 @@ class RIIDCoreService:
 
         return spectrum, live_time_s, real_time_s, calib
 
+    def load_offline_spectrum(self, category: str, filename: str) -> tuple:
+        """Loads a pre-recorded spectrum from any data/spectra/ category
+        (background, batch, or riid) and analyzes it as if it were the
+        current live spectrum, instead of pulling from the DAQ board.
+
+        Reuses the same file parsers load_background_spectrum() does - the
+        .json/.spe schema is shared across categories, only the meaning of
+        the data differs. Requires a background to already be loaded, same
+        precondition the live survey already enforces via the UI.
+
+        Args:
+            category (str): One of 'background', 'batch', 'riid'.
+            filename (str): Bare filename (no path) within that category's folder.
+
+        Returns:
+            (bool, str): (success, message) - message is a summary
+            (potentially including a calibration-mismatch warning, same as
+            load_background_spectrum) or an error description for the UI.
+        """
+        if self.state != 'IDLE':
+            return False, "Cannot load a spectrum while a survey/recording is active."
+        if not self.background_spectrum:
+            return False, "Load a background spectrum first."
+        if not filename:
+            return False, "Select a spectrum file first."
+
+        folder = self.SPECTRA_CATEGORY_DIRS.get(category)
+        if not folder:
+            return False, f"Unknown category: {category}"
+
+        filepath = os.path.join(folder, os.path.basename(filename))
+        if not os.path.isfile(filepath):
+            return False, "File not found."
+
+        ext = os.path.splitext(filepath)[1].lower()
+        try:
+            if ext == '.json':
+                spectrum, live_time_s, real_time_s, file_calib = self._parse_background_json(filepath)
+            elif ext == '.spe':
+                spectrum, live_time_s, real_time_s, file_calib = self._parse_background_spe(filepath)
+            else:
+                return False, "Unsupported file type - choose a .json or .spe file."
+        except Exception as e:
+            logger.error(f"[SERVICE] Failed to load offline spectrum from {filepath}: {e}", exc_info=True)
+            return False, f"Failed to read file: {e}"
+
+        if not spectrum:
+            return False, "File contains no spectrum data."
+
+        self.live_spectrum = spectrum
+        self.survey_hardware_live_time_ms = live_time_s * 1000.0
+        self.survey_hardware_real_time_ms = real_time_s * 1000.0
+        self.survey_elapsed_seconds = int(live_time_s)
+        self.offline_mode = True
+        # Reuses the same "frozen survey" plotting path a STOPped live survey
+        # already uses (trace gating, background time-normalization, CPS
+        # calc all key off this) - a loaded static spectrum needs the exact
+        # same treatment, just sourced from a file instead of a stopped DAQ
+        # read. clear_survey_data() (RESTART) already resets this to False.
+        self.survey_stopped_with_data = True
+        self.set_auto_hysteresis_enabled(False)
+        self.max_counts_limit = 2000  # slider max - "auto-reset to the maximum value"
+        self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
+        self.status_text = "Offline Analysis Ready"
+
+        logger.warning(f"[USER_ACTION] Operator loaded offline analysis spectrum ({category}): {filepath}")
+
+        current_calib = (
+            float(self.system.hw_profile.get('calib_a0', 0.0)),
+            float(self.system.hw_profile.get('calib_a1', 1.0)),
+            float(self.system.hw_profile.get('calib_a2', 0.0)),
+        )
+        if file_calib and not all(abs(a - b) < 1e-6 for a, b in zip(file_calib, current_calib)):
+            return True, (
+                f"Loaded {os.path.basename(filepath)}, but its energy calibration "
+                f"(a0={file_calib[0]:.5f}, a1={file_calib[1]:.5f}, a2={file_calib[2]:.5f}) "
+                f"differs from the current hardware calibration - the spectrum "
+                f"is plotted using the CURRENT calibration and may not align correctly."
+            )
+        return True, f"Loaded {os.path.basename(filepath)}"
+
     def list_spectra_files(self, category: str, ext_filter: str = 'ALL') -> list:
         """Lists files available for bulk download in a data/spectra/ category
         folder.
@@ -1928,7 +2020,10 @@ class RIIDCoreService:
         
         logger.warning("[SERVICE] Operator pressed CLEAR button. Wiping accumulated survey spectrum (background spectrum preserved).")
         self._last_logged_detection = None
-        
+        # RESTART is the documented way out of offline analysis mode back to
+        # live survey - harmless no-op if already False.
+        self.offline_mode = False
+
         if self.state == 'RIID_SURVEY':
             # Let the active acquisition loop perform the actual hardware-level clear
             # on its own next tick rather than tearing down and rebuilding the survey.

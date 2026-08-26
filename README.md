@@ -97,7 +97,7 @@ The primary live survey workspace:
 - **RIID classification** — runs a selectable on-device ML model (`cnn_multilabel` or `cnn_deep`) against the live spectrum, showing detected isotopes, average confidence, live time, and a per-class probability breakdown. **ML Pipeline Settings**, all adjustable live:
   - **Confidence Threshold** (50%-99.9%) — the per-class probability a detection must exceed to count as "detected" (colored red in the probability bars). Classification always runs regardless of this value; it only affects what's reported as detected.
   - **Automatic hysteresis** — switches the next two settings between auto-adaptive (default) and manual.
-  - **ML pipeline trigger** — the peak-channel count (after background subtraction) needed before a classification is attempted; below it, the UI reports "Not enough counts for RIID". Auto: lower for a faint source, so a first result doesn't take minutes; unchanged for a source that already reaches the target quickly. Manual: a fixed value, 1-200 counts.
+  - **Limit of detection** — the peak-channel count (after background subtraction) needed before a classification is attempted; below it, the UI reports "Not enough counts for RIID". Auto: lower for a faint source, so a first result doesn't take minutes; unchanged for a source that already reaches the target quickly. Manual: a fixed value, 1-200 counts.
   - **Spectrum auto-reset** — the peak-channel count at which the accumulated spectrum is automatically cleared and re-accumulation restarts (the count-rate plot's history is kept, not reset). Needed to keep re-evaluating which isotopes are present as the surroundings change during a survey - e.g. carrying the system in a backpack or as a handheld instrument in the field - instead of blending past and present readings into one spectrum. Auto: tracks the current count rate, targeting a reset roughly every 25s. Manual: a fixed value, 1-2,000 counts.
 - **Background spectrum workflow** — record a fresh background, load a previously saved one, or save the currently recorded background to disk (JSON and/or SPE format). **Important:** A background must exist before a survey can be started.
 - **Survey controls** — start/stop a continuous survey, restart (clear the accumulated survey without touching the background), and download the current survey + background bundle as a `.zip` (JSON and SPE).
@@ -120,7 +120,7 @@ Batch/multi-run spectrum acquisition with experiment metadata:
 
 ### Spectra Download
 
-Bulk file management for everything the RIID system has written to disk, organized into three categories — Background, Batch, and RIID — each with select-all, multi-file download, and permanent delete (with confirmation).
+Bulk file management for everything the RIID system has written to disk, organized into three categories — Background, Batch records, and Live survey — each with select-all, multi-file download, and permanent delete (with confirmation).
 
 ![Spectra Download tab: RIID category file listing with select-all, download, and delete controls](docs/res/spectra_download.png)
 
@@ -244,7 +244,7 @@ This overwrites `docs/res/cnn_multilabel_architecture.png` and `docs/res/cnn_dee
 Inference (`ml_inference.py::inference_pipeline`, preprocessing in `ml_preprocessing.py`) runs against the live spectrum on every tick:
 
 1. **Background subtraction** (`MLPreprocessing.subtract_background`) — the background is normalized to the survey's live time and subtracted from the live spectrum; negative results are clipped to zero.
-2. **Limit-of-detection gate** — if the tallest channel of the background-subtracted spectrum doesn't exceed the "ML pipeline trigger" (default 10 counts, see [ML Pipeline Settings](#spectrum-id) above), inference is skipped and the UI reports "Not enough counts for RIID" rather than a low-confidence guess.
+2. **Limit-of-detection gate** — if the tallest channel of the background-subtracted spectrum doesn't exceed the "Limit of detection" (default 10 counts, see [ML Pipeline Settings](#spectrum-id) above), inference is skipped and the UI reports "Not enough counts for RIID" rather than a low-confidence guess.
 3. **Feature preprocessing** (`MLPreprocessing.preprocess_log10`) — crops the first 50 low-energy channels (LLD region), applies `log10(counts + 1)` scaling, smooth with a Savitzky-Golay filter (window length 11, polynomial order 3), decimates by a factor of 8 (every 8th sample), then normalizes to unit area (values sum to 1).
 4. **TFLite inference** — the preprocessed vector is fed to the ML inference model, returning a probability (0.0-1.0) per class.
 

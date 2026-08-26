@@ -105,12 +105,20 @@ BRAND_COLORS = {
     "bg_workspace": "#EEF1F7",  # Soft Pearl White (Workspace background canvas)
     "crimson_trace": "#B9222D", # Trace crimson (Logarithmic counts chart color)
     "subtracted_trace": "#ED692E", # IAEA secondary palette orange - the background-subtracted spectrum trace, distinct from the raw live spectrum (blue) and background (gray)
-    
+
     # Centralized plot aesthetics keys to clean up hardcoded values
     "plot_grid": "#E5E7EB",     # Light Grey for canvas grid lines
     "plot_bg": "#FFFFFF",       # Pure white for chart plotting backgrounds
     "plot_paper": "#FFFFFF",    # Pure white for surrounding card papers
-    "legend_bg": "#FFFFFF"      # Base color for overlay cards
+    "legend_bg": "#FFFFFF",     # Base color for overlay cards
+
+    # Offline analysis mode - dimmer variants of the live-mode trace colors,
+    # plus a distinct workspace background, so a loaded static spectrum is
+    # visually distinguishable from a live one at a glance.
+    "primary_dim": "#8FB8DC",           # dimmed live-survey trace (vs. "primary")
+    "accent_dim": "#C4C4C4",            # dimmed background trace (vs. "accent")
+    "subtracted_trace_dim": "#F2B08E",  # dimmed subtracted trace (vs. "subtracted_trace")
+    "bg_workspace_offline": "#F7EFEF",  # warm-tinted workspace background (vs. "bg_workspace")
 }
 
 def get_rgba_fill(color_key: str, alpha: float = 0.15) -> str:
