@@ -59,8 +59,16 @@ docker load -i "$IMAGE_TAR"
 run_as_user() {
     sudo -H -u "$SUDO_USER" "$@"
 }
-run_as_user mkdir -p "$REPO_DIR/gui/logs"
-run_as_user touch "$REPO_DIR/gui/gui.log"
+mkdir -p "$REPO_DIR/gui/logs"
+touch "$REPO_DIR/gui/gui.log"
+
+# The container's own process runs as root, so any file it creates inside
+# these bind-mounted paths (e.g. the daq-core submodule's own
+# logs/daq_mca.log, opened relative to its CWD) comes out root-owned on the
+# host the first time it's written - chown back to the invoking user on
+# every install/reinstall so a later bare-metal run (uv run main.py outside
+# Docker) can still open them.
+chown -R "$SUDO_USER:$SUDO_USER" "$REPO_DIR/gui/logs" "$REPO_DIR/gui/gui.log"
 
 # The WiFi daemon's socket lives in its own directory
 # (/var/run/riid-wifi/riid-wifi.sock), and that whole directory - not the

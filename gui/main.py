@@ -187,7 +187,8 @@ class RIIDSpectroscopyApp:
         # centers the actual content - otherwise every control stretches all the
         # way to the window edges on large/maximized displays, which looks
         # sparse and makes rows like the calibration panel unreasonably wide.
-        with ui.column().classes('w-full min-h-screen').style(f"background-color: {BRAND_COLORS['bg_workspace']}; font-family: 'Roboto', sans-serif;"):
+        self.workspace_container = ui.column().classes('w-full min-h-screen').style(f"background-color: {BRAND_COLORS['bg_workspace']}; font-family: 'Roboto', sans-serif;")
+        with self.workspace_container:
             with ui.column().classes('w-full max-w-[1600px] mx-auto p-3 gap-3'):
                 
                 # Application Header Layout Block
@@ -345,8 +346,23 @@ class RIIDSpectroscopyApp:
             self.sidebar.refresh_widget_states()
             self.plot_view.update_ui_elements()
 
+        # Offline analysis mode takes precedence over the ordinary
+        # hardware-connectivity readout - the operator is deliberately not
+        # looking at live hardware right now, so "ONLINE"/"DISCONNECTED"
+        # would be misleading either way.
+        offline_mode = backend_service.offline_mode
+        self.workspace_container.style(
+            f"background-color: {BRAND_COLORS['bg_workspace_offline' if offline_mode else 'bg_workspace']}; "
+            "font-family: 'Roboto', sans-serif;"
+        )
+
         # Handle responsive layout mutations on hot-plug operations
-        if self.hardware_ok:
+        if offline_mode:
+            self.connection_alert_banner.classes(add='bg-red-50 border-red-200 text-red-800', remove='bg-green-50 border-green-200 text-green-800')
+            self.banner_icon.set_visibility(False)
+            self.banner_text.set_text("Offline analysis mode - reviewing a loaded spectrum, not live hardware.")
+            self.banner_status_pill.set_text("Offline analysis").classes(add='text-red-800', remove='text-green-800')
+        elif self.hardware_ok:
             self.connection_alert_banner.classes(add='bg-green-50 border-green-200 text-green-800', remove='bg-red-50 border-red-200 text-red-800')
             self.banner_icon.set_visibility(False)
             self.banner_text.set_text(f"Hardware connection online: {current_status}")
@@ -370,4 +386,4 @@ def index():
     RIIDSpectroscopyApp()
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title="RIID Gamma Spectroscopy Station", port=8080, favicon=_LOGO_PATH)
+    ui.run(title="RIID Gamma Spectroscopy Station", port=8080, favicon=_LOGO_PATH, reload=False, show=False)

@@ -178,5 +178,25 @@
     "Detector type number": "38B38/SIP-E3-X2",
     "Detector serial number": "S2AC2204",
     "Analyzer name": "NSIL-DPP4SiPM"
+  },
+  "210328BE4089B": {
+    "SYS-ID": "SYS10",
+    "tau_d": 1.21e-06,
+    "tau_r": 2.06e-07,
+    "shaper_s_tau_pk": 2.5e-06,
+    "shaper_s_tau_pk_top": 1e-06,
+    "vga_gain_coarse": 6.0,
+    "blr_s_threshold_gain": 4.0,
+    "smoothing_factor": 2,
+    "invert_pulse": false,
+    "calib_a0": 0,
+    "calib_a1": 1,
+    "calib_a2": 0,
+    "Detector type": "NaI(Tl)",
+    "Detector geometry": "Cylindrical",
+    "Detector size": "3.8 cm diameter x 3.8 cm thick",
+    "Detector type number": "38B38/SIP-E3-X2",
+    "Detector serial number": "UNKNOWN",
+    "Analyzer name": "NSIL-DPP4SiPM"
   }
 }

@@ -60,7 +60,10 @@ class SpectrumPlotContainer:
         with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2 riid-spectrum-split-row'):
             with ui.column().classes('rounded-lg border bg-white p-2 gap-1').style('width: 65%; border-color: #E2E8F0;'):
                 with ui.row().classes('w-full justify-between items-center px-1 flex-wrap'):
-                    self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                    with ui.column().classes('gap-0'):
+                        self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                        self.spectrum_filename_label = ui.label('').classes('text-[10px] font-mono text-zinc-500')
+                        self.spectrum_filename_label.set_visibility(False)
                     with ui.row().classes('items-center gap-3'):
                         # Lets the operator choose between the two
                         # visualization templates - overlaid background+spectrum
@@ -186,15 +189,19 @@ class SpectrumPlotContainer:
         Also updates the card's own title to reflect the active mode."""
         active_style = "color: #FFFFFF !important; font-weight: bold; border: none;"
         inactive_style = "background-color: #FFFFFF !important; color: #4B5563 !important; border: 1px solid #D1D5DB !important; font-weight: normal;"
-        
+        base_title = 'Offline spect.' if self.service.offline_mode else 'Live spectrum'
+
+        self.spectrum_filename_label.set_text(self.service.offline_spectrum_filename)
+        self.spectrum_filename_label.set_visibility(bool(self.service.offline_mode and self.service.offline_spectrum_filename))
+
         if self.viz_mode == 'overlay':
             self.viz_mode_btn_overlay.style(f"background-color: {BRAND_COLORS['primary']} !important; {active_style}")
             self.viz_mode_btn_subtracted.style(inactive_style)
-            self.spectrum_card_title.set_text('Live spectrum')
+            self.spectrum_card_title.set_text(base_title)
         else:
             self.viz_mode_btn_overlay.style(inactive_style)
             self.viz_mode_btn_subtracted.style(f"background-color: {BRAND_COLORS['subtracted_trace']} !important; {active_style}")
-            self.spectrum_card_title.set_text('Live spectrum (background subtracted)')
+            self.spectrum_card_title.set_text(f'{base_title} (background subtracted)')
 
     def trigger_log_scale_change(self, e):
         """Toggles the live spectrum plot between linear and log count scale."""
@@ -258,12 +265,18 @@ class SpectrumPlotContainer:
             sum(bg_data) if bg_data else 0,
             bool(use_log),
             bool(getattr(self.service, 'survey_stopped_with_data', False)),
+            bool(getattr(self.service, 'offline_mode', False)),
+            getattr(self.service, 'offline_spectrum_filename', ''),
             self.viz_mode,
         )
         
         if not is_actively_recording and render_signature == self._last_render_signature:
             return
         self._last_render_signature = render_signature
+        # offline_mode is part of the signature above, so this only re-runs
+        # (and re-sends the title/button styling) exactly when it - or
+        # viz_mode - actually changes, not on every tick.
+        self._update_viz_mode_buttons()
         
         # Guard: If no spectrum data is captured anywhere, draw the standby splash card
         if not spectrum_data and not bg_data:
@@ -561,7 +574,11 @@ class SpectrumPlotContainer:
         if target_raw_y is not None and len(target_raw_y) == num_channels:
             peak_y = float(max(target_raw_y)) if target_raw_y else 0.0
             processed_bg_y = [v if v >= 1 else 1 for v in target_raw_y] if use_log else target_raw_y
-            
+
+            # Dimmer variant while analyzing a loaded (not live) spectrum,
+            # so the whole plot reads as visually muted in offline mode.
+            bg_color_key = 'accent_dim' if self.service.offline_mode else 'accent'
+
             if use_log:
                 # No area shading in log scale - filling to y=0 on a log axis
                 # is misleading, since the visual "zero" floor is actually the
@@ -572,21 +589,21 @@ class SpectrumPlotContainer:
                     'type': 'scatter',
                     'mode': 'lines',
                     'name': trace_name,
-                    'line': {'color': BRAND_COLORS['accent'], 'width': 1.2},
+                    'line': {'color': BRAND_COLORS[bg_color_key], 'width': 1.2},
                     'opacity': 0.85
                 })
             else:
                 # Linear scale continues to run cleanly utilizing a pale translucent gray area fill
-                shading_fill_color = get_rgba_fill('accent', alpha=0.20)
+                shading_fill_color = get_rgba_fill(bg_color_key, alpha=0.20)
                 traces.append({
-                    'x': x_axis, 
-                    'y': processed_bg_y, 
-                    'type': 'scatter', 
-                    'mode': 'lines', 
+                    'x': x_axis,
+                    'y': processed_bg_y,
+                    'type': 'scatter',
+                    'mode': 'lines',
                     'name': trace_name,
-                    'line': {'color': BRAND_COLORS['accent'], 'width': 1.4},
-                    'fill': 'tozeroy', 
-                    'fillcolor': shading_fill_color, 
+                    'line': {'color': BRAND_COLORS[bg_color_key], 'width': 1.4},
+                    'fill': 'tozeroy',
+                    'fillcolor': shading_fill_color,
                     'opacity': 0.95
                 })
             
@@ -648,13 +665,20 @@ class SpectrumPlotContainer:
                 peak_y = live_max
                 
             processed_live_y = [val if val >= 1 else 1 for val in spectrum_data] if use_log else spectrum_data
-            
+
             # Dynamically embed the current CPS metrics straight into the plot trace name label string
+            is_offline = self.service.offline_mode
             if state == 'RIID_SURVEY':
                 legend_label_name = f"Live Survey ({self._format_cps(cps_value)})"
+            elif is_offline:
+                legend_label_name = f"Offline Analysis ({self._format_cps(cps_value)})"
             else:
                 legend_label_name = f"Last Survey (Stopped, {self._format_cps(cps_value)})"
-            
+
+            # Dimmer variant while analyzing a loaded (not live) spectrum,
+            # so the two modes are visually distinguishable at a glance.
+            trace_color = BRAND_COLORS['primary_dim'] if is_offline else BRAND_COLORS['primary']
+
             if use_log:
                 # No area shading fill in log scale - see the background
                 # trace's log-mode branch above for why.
@@ -665,21 +689,21 @@ class SpectrumPlotContainer:
                     'mode': 'lines',
                     'name': legend_label_name,
                     'layer': 'below',
-                    'line': {'color': BRAND_COLORS['primary'], 'width': 1.8}
+                    'line': {'color': trace_color, 'width': 1.8}
                 })
             else:
                 # Pale transparent blue area-under-the-curve shade, generated
                 # from the centralized primary color hex key.
-                primary_shading_fill = get_rgba_fill('primary', alpha=0.15)
-                
+                primary_shading_fill = get_rgba_fill('primary_dim' if is_offline else 'primary', alpha=0.15)
+
                 traces.append({
-                    'x': x_axis, 
-                    'y': processed_live_y, 
-                    'type': 'scatter', 
-                    'mode': 'lines', 
+                    'x': x_axis,
+                    'y': processed_live_y,
+                    'type': 'scatter',
+                    'mode': 'lines',
                     'name': legend_label_name,
                     'layer': 'below',
-                    'line': {'color': BRAND_COLORS['primary'], 'width': 1.8},
+                    'line': {'color': trace_color, 'width': 1.8},
                     'fill': 'tozeroy',
                     'fillcolor': primary_shading_fill
                 })
@@ -715,6 +739,8 @@ class SpectrumPlotContainer:
             bg_data=bg_data, bg_live_time_s=bg_ms / 1000.0
         )
         
+        is_offline = self.service.offline_mode
+        mode_label = "Offline analysis" if is_offline else "Live survey"
         has_background = bool(bg_data) and len(bg_data) > 0
         if has_background:
             # The legend's count-rate is the NET
@@ -730,23 +756,26 @@ class SpectrumPlotContainer:
             raw_cps = float(sum(spectrum_data)) / survey_secs if survey_secs > 0 else 0.0
             bg_cps = float(sum(bg_data)) / bg_secs if bg_secs > 0 else 0.0
             net_cps = max(0.0, raw_cps - bg_cps)
-            trace_name = f"Live survey, no bkg. ({self._format_cps(net_cps)})"
+            trace_name = f"{mode_label}, no bkg. ({self._format_cps(net_cps)})"
         else:
             # subtract_background() itself falls back to the raw spectrum when
             # there's nothing usable to subtract - name the trace accordingly.
-            trace_name = f"Live Survey Session ({self._format_cps(cps_value)}) - no background to subtract"
-        
+            trace_name = f"{mode_label} Session ({self._format_cps(cps_value)}) - no background to subtract"
+
         peak_y = float(max(subtracted)) if subtracted else 0.0
         processed_y = [v if v >= 1 else 1 for v in subtracted] if use_log else subtracted
-        
+
+        # Dimmer variant while analyzing a loaded (not live) spectrum, same
+        # as the overlay-mode live trace.
+        trace_color = BRAND_COLORS['subtracted_trace_dim'] if is_offline else BRAND_COLORS['subtracted_trace']
         trace = {
             'x': x_axis, 'y': processed_y, 'type': 'scatter', 'mode': 'lines',
             'name': trace_name,
-            'line': {'color': BRAND_COLORS['subtracted_trace'], 'width': 1.8},
+            'line': {'color': trace_color, 'width': 1.8},
         }
         if not use_log:
             trace['fill'] = 'tozeroy'
-            trace['fillcolor'] = get_rgba_fill('subtracted_trace')
+            trace['fillcolor'] = get_rgba_fill('subtracted_trace_dim' if is_offline else 'subtracted_trace')
         traces.append(trace)
         
         return peak_y
@@ -852,8 +881,8 @@ class ControlPanelSidebar:
                 ).classes('text-xs text-zinc-700 font-medium')
                 
                 current_min_counts = self.service.ml_inference.get_min_counts()
-                self.min_counts_auto_label = ui.label(f"ML pipeline trigger (auto): {current_min_counts} counts").classes('text-xs text-zinc-700')
-                self.min_counts_label = ui.label(f"ML pipeline trigger: {current_min_counts} counts").classes('text-xs text-zinc-700')
+                self.min_counts_auto_label = ui.label(f"Limit of detection (auto): {current_min_counts} counts").classes('text-xs text-zinc-700')
+                self.min_counts_label = ui.label(f"Limit of detection: {current_min_counts} counts").classes('text-xs text-zinc-700')
                 self.min_counts_slider = ui.slider(
                     min=1, max=200, step=1, value=current_min_counts,
                     on_change=self.trigger_min_counts_change
@@ -899,8 +928,17 @@ class ControlPanelSidebar:
                 # Bundles the last spectrum shown here with the current
                 # background into a downloadable .zip (both in .json and .spe).
                 # Visible only once a background has settled (see refresh_widget_states).
-                self.download_riid_btn = ui.button('Download Spectrum', icon='download', on_click=self.trigger_download_riid)
-                self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('w-full mt-1 py-1.5 text-xs')
+                with ui.row().classes('w-full gap-2 no-wrap mt-1'):
+                    self.download_riid_btn = ui.button('Download', icon='download', on_click=self.open_download_riid_dialog)
+                    self.download_riid_btn.style(f"background-color: {BRAND_COLORS['primary']} !important; color: #FFFFFF !important; font-weight: bold;").props('dense').classes('flex-1 py-1.5 text-xs')
+
+                    # Opens the offline-analysis file picker - same idle+has_bg
+                    # precondition as Download above, matching the backend
+                    # guard in load_offline_spectrum.
+                    self.load_spectrum_btn = ui.button('Offline', icon='folder_open', on_click=self.open_load_spectrum_dialog)
+                    self.load_spectrum_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;").props('dense').classes('flex-1 py-1.5 text-xs')
+                self._build_load_spectrum_dialog()
+                self._build_download_riid_modal()
 
             # ============ BACKGROUND SPECTRUM (collapsible) ============
             # Recording/loading/storing a background is a secondary, occasional
@@ -972,7 +1010,7 @@ class ControlPanelSidebar:
         moves - only usable in manual mode (see trigger_auto_hysteresis_toggle),
         so this always takes effect immediately with no adaptation."""
         new_min_counts = int(e.value)
-        self.min_counts_label.set_text(f"ML pipeline trigger: {new_min_counts} counts")
+        self.min_counts_label.set_text(f"Limit of detection: {new_min_counts} counts")
         self.service.set_ml_min_counts(new_min_counts)
 
     def trigger_auto_hysteresis_toggle(self, e):
@@ -995,7 +1033,7 @@ class ControlPanelSidebar:
             # reasonable starting point for the operator to adjust from.
             current_min_counts = self.service.ml_inference.get_min_counts()
             self.min_counts_slider.set_value(current_min_counts)
-            self.min_counts_label.set_text(f"ML pipeline trigger: {current_min_counts} counts")
+            self.min_counts_label.set_text(f"Limit of detection: {current_min_counts} counts")
             self.max_cnt_input.set_value(self.service.max_counts_limit)
             self.max_cnt_manual_label.set_text(f"Spectrum auto-reset: {self.service.max_counts_limit:,} counts")
 
@@ -1027,6 +1065,60 @@ class ControlPanelSidebar:
             # A returned message containing a calibration mismatch is still a
             # successful load, just one the operator should be aware of.
             ui.notify(msg, type="warning" if "differs" in msg else "positive")
+        else:
+            ui.notify(msg, type="negative")
+
+    # ============ OFFLINE ANALYSIS ============
+
+    def _build_load_spectrum_dialog(self):
+        """Builds the "Load Spectrum" picker dialog: one tab per spectra
+        category (Background / Batch records / Live survey - matching
+        Spectra Download's own category names), each a single-select
+        dropdown + refresh button, mirroring the existing load-background
+        picker above but generalized over all three categories via
+        RIIDCoreService.list_spectra_files()/SPECTRA_CATEGORY_DIRS."""
+        categories = [('background', 'Background'), ('batch', 'Batch records'), ('riid', 'Live survey')]
+        self._offline_selects = {}
+        with ui.dialog() as self.load_spectrum_dialog, ui.card().classes('p-4 w-[90vw] max-w-md space-y-3'):
+            ui.label('Load Spectrum').classes('text-sm font-bold text-blue-600')
+            with ui.tabs().classes('w-full') as self.load_spectrum_tabs:
+                for key, label in categories:
+                    ui.tab(key, label=label)
+            with ui.tab_panels(self.load_spectrum_tabs, value='riid').classes('w-full'):
+                for key, label in categories:
+                    with ui.tab_panel(key).classes('p-0'):
+                        with ui.row().classes('w-full gap-2 items-end'):
+                            select = ui.select(options=[], label=f'{label} files').props('dense outlined').classes('flex-1 text-xs')
+                            ui.button(icon='refresh', on_click=lambda e, k=key: self._refresh_offline_file_list(k)) \
+                                .props('dense flat round').classes('text-zinc-600')
+                        self._offline_selects[key] = select
+            with ui.row().classes('w-full gap-2 pt-1'):
+                ui.button('Cancel', on_click=self.load_spectrum_dialog.close).props('dense outline').classes('flex-1')
+                ui.button('Load', icon='folder_open', on_click=self.trigger_load_offline_spectrum).props('dense color=primary').classes('flex-1')
+
+    def _refresh_offline_file_list(self, category: str):
+        """Repopulates one category's dropdown in the Load Spectrum dialog."""
+        files = self.service.list_spectra_files(category)
+        self._offline_selects[category].options = files
+        self._offline_selects[category].update()
+
+    def open_load_spectrum_dialog(self):
+        """Refreshes every category's file list and opens the picker."""
+        for key in self._offline_selects:
+            self._refresh_offline_file_list(key)
+        self.load_spectrum_dialog.open()
+
+    def trigger_load_offline_spectrum(self):
+        """Loads whichever file is selected in the picker's active tab and
+        switches into offline analysis mode."""
+        category = self.load_spectrum_tabs.value
+        filename = self._offline_selects[category].value
+        logger.warning(f"[USER_ACTION] Operator clicked LOAD button in Load Spectrum dialog. Category: {category}, File: {filename}")
+        ok, msg = self.service.load_offline_spectrum(category, filename)
+        if ok:
+            ui.notify(msg, type="warning" if "differs" in msg else "positive")
+            ui.notify("Switched to offline analysis mode", type="info")
+            self.load_spectrum_dialog.close()
         else:
             ui.notify(msg, type="negative")
 
@@ -1093,18 +1185,43 @@ class ControlPanelSidebar:
         self.service.stop_execution()
 
     def trigger_clear(self):
-        """Wipes the accumulated survey spectrum, preserving the background."""
+        """Wipes the accumulated survey spectrum, preserving the background.
+        Also the documented way out of offline analysis mode back to live
+        survey - clear_survey_data() resets that flag too."""
         logger.warning("[USER_ACTION] Operator clicked RESTART button - wiping accumulated survey spectrum (background preserved).")
+        was_offline = self.service.offline_mode
         self.service.clear_survey_data()
+        if was_offline:
+            ui.notify("Switched to live survey mode", type="info")
+
+    def _build_download_riid_modal(self):
+        """Prompt dialog that asks for a file name (timestamp-prefixed
+        suggestion) before bundling the current RIID spectrum + background
+        into a downloadable zip."""
+        with ui.dialog() as self.download_riid_dialog, ui.card().classes('p-4 w-96 space-y-3'):
+            ui.label('Store and Download Spectrum').classes('text-sm font-bold text-blue-600')
+            self.riid_filename_input = ui.input('File Name').props('dense outlined').classes('w-full text-xs')
+            with ui.row().classes('w-full gap-2 pt-1'):
+                ui.button('Cancel', on_click=self.download_riid_dialog.close).props('dense outline').classes('flex-1')
+                ui.button('Download', icon='download', on_click=self.trigger_download_riid).props('dense color=primary').classes('flex-1')
+
+    def open_download_riid_dialog(self):
+        """Opens the store-and-download dialog, pre-filled with a
+        timestamp + serial number filename suggestion."""
+        logger.warning("[USER_ACTION] Operator clicked Download Spectrum button.")
+        default_name = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{self.service.system.serial_number}_riid"
+        self.riid_filename_input.set_value(default_name)
+        self.download_riid_dialog.open()
 
     def trigger_download_riid(self):
-        """Bundles the current RIID spectrum + background into a downloadable zip."""
-        logger.warning("[USER_ACTION] Operator clicked Download Spectrum button.")
-        ok, msg, zip_bytes, base_filename = self.service.build_riid_download_zip()
+        """Bundles the current RIID spectrum + background into a downloadable
+        zip, under the file name entered in the store-and-download dialog."""
+        ok, msg, zip_bytes, base_filename = self.service.build_riid_download_zip(self.riid_filename_input.value)
         if not ok:
             ui.notify(msg, type="negative")
             return
         ui.notify(msg, type="positive")
+        self.download_riid_dialog.close()
         ui.download(zip_bytes, f"{base_filename}_bundle.zip", media_type='application/zip')
 
     def refresh_widget_states(self):
@@ -1112,6 +1229,7 @@ class ControlPanelSidebar:
         is_idle = self.service.state == 'IDLE'
         is_bg_running = self.service.state == 'BG_RECORDING'
         is_survey_running = self.service.state == 'RIID_SURVEY'
+        is_offline = self.service.offline_mode
         hw_ok = self.service.is_hardware_available
         has_bg = len(self.service.background_spectrum) > 0
 
@@ -1150,14 +1268,26 @@ class ControlPanelSidebar:
         # whichever display is relevant for the current mode.
         current_min_counts = self.service.ml_inference.get_min_counts()
         if current_auto_enabled:
-            self.min_counts_auto_label.set_text(f"ML pipeline trigger (auto): {current_min_counts} counts")
+            self.min_counts_auto_label.set_text(f"Limit of detection (auto): {current_min_counts} counts")
         elif self.min_counts_slider.value != current_min_counts:
             self.min_counts_slider.set_value(current_min_counts)
-            self.min_counts_label.set_text(f"ML pipeline trigger: {current_min_counts} counts")
+            self.min_counts_label.set_text(f"Limit of detection: {current_min_counts} counts")
         
         if not current_auto_enabled and self.max_cnt_input.value != self.service.max_counts_limit:
             self.max_cnt_input.set_value(self.service.max_counts_limit)
             self.max_cnt_manual_label.set_text(f"Spectrum auto-reset: {self.service.max_counts_limit:,} counts")
+
+        # Offline analysis mode forces manual hysteresis (applied backend-side
+        # by load_offline_spectrum) and locks it there - the Limit of
+        # detection slider stays the one live-adjustable control, same as
+        # during a live survey.
+        if is_offline:
+            self.auto_hysteresis_checkbox.disable()
+            self.max_cnt_input.disable()
+            self.min_counts_slider.enable()
+        else:
+            self.auto_hysteresis_checkbox.enable()
+            self.max_cnt_input.enable()
 
         # Reflects the backend's current dynamically-computed
         # hysteresis threshold - only actually changes while a survey is
@@ -1256,6 +1386,13 @@ class ControlPanelSidebar:
         # in-progress/last-shown RIID spectrum together with the background is
         # exactly the point of this button.
         self.download_riid_btn.set_visibility(has_bg and not is_bg_running)
+        self.download_riid_btn.set_text('STORE AND DOWNLOAD' if is_survey_running else 'Download')
+
+        # Load Spectrum - same idle+has_bg precondition load_offline_spectrum()
+        # itself enforces; stays visible/usable while already in offline mode
+        # too, so the operator can load a different file without an
+        # intervening RESTART (state stays IDLE throughout).
+        self.load_spectrum_btn.set_visibility(has_bg and is_idle)
 
         # Single toggle button: shows START when idle (ready to run), STOP while a
         # survey/background/batch run is in progress. Doesn't erase the spectrum
@@ -1271,12 +1408,27 @@ class ControlPanelSidebar:
             self.play_stop_btn.style(f"background-color: {BRAND_COLORS['crimson_trace']} !important; color: #FFFFFF !important; font-weight: bold;")
 
         self.play_stop_btn.set_visibility((is_idle and hw_ok and has_bg) or not is_idle)
+        # Disabled (not hidden) while analyzing a loaded spectrum - the
+        # operator must press RESTART or Load Spectrum again instead.
+        if is_offline:
+            self.play_stop_btn.disable()
+        else:
+            self.play_stop_btn.enable()
 
         # CLEAR only touches the accumulated survey spectrum. It stays available
         # both when idle and during an active survey so it doesn't require STOP
         # first; it's hidden only during BG recording / batch runs where clearing
         # would be ambiguous or unsafe.
         self.clear_btn.set_visibility(is_idle or is_survey_running)
+        # While offline, this button's only job is leaving offline mode -
+        # relabeled so that's obvious, rather than reading as a generic
+        # "wipe the spectrum" action like it does during a live survey.
+        if is_offline:
+            self.clear_btn.set_text('LIVE SURVEY')
+            self.clear_btn.style("background-color: #10B981 !important; color: #FFFFFF !important; border: none; font-weight: bold;")
+        else:
+            self.clear_btn.set_text('RESTART')
+            self.clear_btn.style(f"background-color: {BRAND_COLORS['secondary']} !important; color: #FFFFFF !important; border: 1px solid #4A5568;")
 
         # Replaces the controls entirely with an explicit message when idle
         # with no background recorded yet - a survey can't meaningfully start
