@@ -180,7 +180,7 @@
     "Analyzer name": "NSIL-DPP4SiPM"
   },
   "210328BE4089B": {
-    "SYS-ID": "SYS-10",
+    "SYS-ID": "SYS10",
     "tau_d": 1.21e-06,
     "tau_r": 2.06e-07,
     "shaper_s_tau_pk": 2.5e-06,
