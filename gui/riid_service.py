@@ -1026,7 +1026,11 @@ class RIIDCoreService:
         mid-survey could produce a confusing mix of old- and new-model
         results. The GUI is expected to only enable this control while
         stopped, but this method also guards defensively.
-        
+
+        In offline mode there's no running survey loop to pick this change
+        up on its own next tick, so classification is re-run immediately
+        against the already-loaded spectrum under the new model instead.
+
         Returns:
             (bool, str): (success, message) for the UI to display.
         """
@@ -1051,6 +1055,8 @@ class RIIDCoreService:
             # cnn_multilabel don't share the same classes), so clear it
             # rather than risk displaying mismatched class names.
             self.last_ml_result = None
+            if self.offline_mode and self.live_spectrum:
+                self.current_isotope_id = self._execute_ml_pipeline(self.live_spectrum, self.survey_elapsed_seconds)
             logger.warning(f"[USER_ACTION] Operator switched ML model to '{model_name}'.")
             return True, f"Switched to {model_name}."
         except Exception as e:
