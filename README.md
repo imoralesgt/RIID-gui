@@ -108,6 +108,19 @@ The "Spectrum - Background" visualization mode shows the same survey with the ba
 
 ![Spectrum ID tab: background-subtracted view isolating the Cs-137 photopeak](docs/res/spectrum_id_subtracted.png)
 
+#### Offline analysis mode
+
+Runs the same RIID classification pipeline against a spectrum already on disk instead of a live DAQ feed — for reviewing a field recording back at a desk, without a detector attached. Click **Offline** (next to Download) to pick one file from a category picker matching Spectra Download's own layout (Background, Batch records, Live survey); the loaded file's name is shown under the plot title, and classification runs immediately.
+
+While active:
+
+- The **Start** button is disabled — leaving offline mode requires either **Restart** (labeled **Live Survey**, in green, while offline) to return to live acquisition, or picking another file to analyze.
+- **Automatic hysteresis** is forced off: **Limit of detection** becomes a fixed, still live-adjustable value, and **Spectrum auto-reset** is pinned to its maximum.
+- The live-survey and background traces switch to dimmer colors, the workspace background shifts, and the top-right status tag switches from "ONLINE" to a red "Offline analysis" indicator — all to keep it visually obvious this isn't a live reading.
+- Same precondition as a live survey: a background spectrum must already be loaded.
+
+![Spectrum ID tab: offline analysis of a pre-recorded survey, with Co-60 and Cs-137 both detected](docs/res/spectrum_id_offline.png)
+
 ### Spectrum Recording
 
 Batch/multi-run spectrum acquisition with experiment metadata:
