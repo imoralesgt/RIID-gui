@@ -169,6 +169,10 @@ class RIIDCoreService:
         # state value, since it isn't a DAQ activity like the other three.
         # Cleared by clear_survey_data() (the RESTART button).
         self.offline_mode = False
+        # Bare filename (no path/extension) of the spectrum currently loaded
+        # in offline_mode, for display alongside the plot title. Empty
+        # outside offline_mode.
+        self.offline_spectrum_filename = ""
         
         # Dynamic Spectrum Vector Storage Buffers
         self.live_spectrum = []
@@ -1835,6 +1839,7 @@ class RIIDCoreService:
         self.survey_hardware_real_time_ms = real_time_s * 1000.0
         self.survey_elapsed_seconds = int(live_time_s)
         self.offline_mode = True
+        self.offline_spectrum_filename = os.path.splitext(os.path.basename(filepath))[0]
         # Reuses the same "frozen survey" plotting path a STOPped live survey
         # already uses (trace gating, background time-normalization, CPS
         # calc all key off this) - a loaded static spectrum needs the exact
@@ -2033,6 +2038,7 @@ class RIIDCoreService:
         # RESTART is the documented way out of offline analysis mode back to
         # live survey - harmless no-op if already False.
         self.offline_mode = False
+        self.offline_spectrum_filename = ""
 
         if self.state == 'RIID_SURVEY':
             # Let the active acquisition loop perform the actual hardware-level clear

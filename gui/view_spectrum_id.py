@@ -60,7 +60,10 @@ class SpectrumPlotContainer:
         with ui.row().classes('w-full gap-3 items-stretch no-wrap mt-2 riid-spectrum-split-row'):
             with ui.column().classes('rounded-lg border bg-white p-2 gap-1').style('width: 65%; border-color: #E2E8F0;'):
                 with ui.row().classes('w-full justify-between items-center px-1 flex-wrap'):
-                    self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                    with ui.column().classes('gap-0'):
+                        self.spectrum_card_title = ui.label('Live spectrum').classes('text-xs font-bold uppercase tracking-wide text-zinc-700')
+                        self.spectrum_filename_label = ui.label('').classes('text-[10px] font-mono text-zinc-500')
+                        self.spectrum_filename_label.set_visibility(False)
                     with ui.row().classes('items-center gap-3'):
                         # Lets the operator choose between the two
                         # visualization templates - overlaid background+spectrum
@@ -188,6 +191,9 @@ class SpectrumPlotContainer:
         inactive_style = "background-color: #FFFFFF !important; color: #4B5563 !important; border: 1px solid #D1D5DB !important; font-weight: normal;"
         base_title = 'Offline spect.' if self.service.offline_mode else 'Live spectrum'
 
+        self.spectrum_filename_label.set_text(self.service.offline_spectrum_filename)
+        self.spectrum_filename_label.set_visibility(bool(self.service.offline_mode and self.service.offline_spectrum_filename))
+
         if self.viz_mode == 'overlay':
             self.viz_mode_btn_overlay.style(f"background-color: {BRAND_COLORS['primary']} !important; {active_style}")
             self.viz_mode_btn_subtracted.style(inactive_style)
@@ -260,6 +266,7 @@ class SpectrumPlotContainer:
             bool(use_log),
             bool(getattr(self.service, 'survey_stopped_with_data', False)),
             bool(getattr(self.service, 'offline_mode', False)),
+            getattr(self.service, 'offline_spectrum_filename', ''),
             self.viz_mode,
         )
         
